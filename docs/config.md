@@ -1,6 +1,19 @@
-# 诊断配置项
+# 配置
 
-`config/z_tweaks-client.toml` 的 `debug` 段，默认全关。这些是调界面时用的，正常游玩不用动。改完即时生效，关闭配置界面时写盘。
+`config/z_tweaks-client.toml`，也可以从游戏内的「选项 → Mod → TACZ: Z-Tweaks → Config」打开。界面里改完即时生效（所有读取点都是运行时 `.get()`），关闭界面时写盘。
+
+## `refit` 段
+
+| 项 | 默认 | 说明 |
+|---|---|---|
+| `pros_cons_mode` | `DELTA` | Pros/Cons 生成方式：`DELTA` 自算增减 / `TACZ_TEXT` 复用 TACZ 成品文本 |
+| `takeover` | `true` | 接管原生改装界面。关掉就回到 TACZ 原生界面，日志里会留一条说明是被配置关的 |
+| `orbit_camera` | `true` | 轨道相机总开关，硬关：关掉后 `V` 键也开不回来 |
+| `virtual_assembly` | `true` | 悬停虚拟装配总开关，硬关：关掉后预览始终是手上的真枪 |
+
+## `debug` 段
+
+调界面时用的，默认全关，正常游玩不用动。
 
 | 项 | 默认 | 说明 |
 |---|---|---|
@@ -16,5 +29,3 @@
 | `zoom_step` | `0.15` | 滚轮每格对应的缩放增量 |
 
 `V` 和 `G` 得先在 `camera_hotkey` / `native_bars_key` 里打开才响应。后四项（`roll_speed` / `yaw_speed` / `pan_speed` / `zoom_step`）决定拖一屏转多少，是唯一需要按手感反复调的。
-
-其余的配置项在 README 的「配置」一节。
