@@ -1168,7 +1168,8 @@ public class ZtRefitScreen extends GunRefitScreen {
             } else {
                 // 左键：上下拖 = roll，绕枪械自身长轴（模型 Z 轴）滚转；
                 // 左右拖 = yaw，绕竖直轴环绕。两个自由度已足以到达任意姿态，故不再设"点头"。
-                OrbitCamera.rotateRoll((float) (fy * ZtConfig.ROLL_SPEED.get()));
+                // 上下取负：按手感反馈反转 —— 鼠标下拖时枪往"看得见的那一面"转，往上拖反之。
+                OrbitCamera.rotateRoll((float) (-fy * ZtConfig.ROLL_SPEED.get()));
                 OrbitCamera.rotateY((float) (fx * ZtConfig.YAW_SPEED.get()));
             }
             return true;
