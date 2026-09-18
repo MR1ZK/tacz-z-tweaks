@@ -69,7 +69,7 @@
 3. 构建本模组：
 
 ```bash
-./gradlew build          # 产物在 build/libs/z_tweaks-1.20.1-0.1.0.jar
+./gradlew build          # 产物在 build/libs/z_tweaks-1.20.1-0.1.1.jar
 ./gradlew runClient      # 启动开发客户端（需要 libs/ 中存在 TACZ jar）
 ```
 
