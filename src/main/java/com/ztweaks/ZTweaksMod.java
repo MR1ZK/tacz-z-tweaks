@@ -1,6 +1,9 @@
 package com.ztweaks;
 
+import com.ztweaks.config.ZtConfig;
+import net.minecraftforge.fml.ModLoadingContext;
 import net.minecraftforge.fml.common.Mod;
+import net.minecraftforge.fml.config.ModConfig;
 
 /**
  * TACZ: Z-Tweaks 主类。
@@ -14,6 +17,6 @@ public class ZTweaksMod {
     public static final String MOD_ID = "z_tweaks";
 
     public ZTweaksMod() {
-        // M0：无注册内容
+        ModLoadingContext.get().registerConfig(ModConfig.Type.CLIENT, ZtConfig.SPEC);
     }
 }

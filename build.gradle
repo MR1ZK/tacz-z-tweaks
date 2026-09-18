@@ -91,13 +91,18 @@ dependencies {
     minecraft "net.minecraftforge:forge:${forge_version}"
 
     // ---- TACZ 本体 ----
-    // 方式一（默认）：把 TACZ 的发布 jar 放到 libs/ 下，文件名形如
-    //   tacz-1.20.1-1.1.8-hotfix.jar
+    // 把 TACZ 的发布 jar 放到 libs/ 下，文件名形如 tacz-1.20.1-1.1.8-hotfix.jar
     // 来源：① 在 ../TACZ 仓库执行 `gradlew build` 取 build/libs 下的产物；
     //       ② 或从 CurseForge / Modrinth 下载对应版本。
-    compileOnly fg.deobf(files("libs/tacz-${minecraft_version}-${tacz_version}.jar"))
+    //
+    // 注意：必须写成 flatDir 坐标（group:name:version），不能用 files(...)。
+    // ForgeGradle 6 对 files(...) 依赖不会做 deobf，会直接拿 SRG 名编译
+    // （表现为 "Cannot deobfuscate dependency of type DefaultFileCollectionDependency"，
+    //  随后 render()/init() 这类覆写全部失效），因此这里走 flatDir。
+    def taczDep = "local:tacz-${minecraft_version}:${tacz_version}"
+    compileOnly fg.deobf(taczDep)
     // 开发环境需要 TACZ 在运行时存在，否则客户端无法启动：
-    runtimeOnly fg.deobf(files("libs/tacz-${minecraft_version}-${tacz_version}.jar"))
+    runtimeOnly fg.deobf(taczDep)
 
     // 方式二（备选）：走 CurseMaven，需填入对应文件的 fileId
     // compileOnly fg.deobf("curse.maven:tacz-706784:<fileId>")
