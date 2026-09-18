@@ -203,6 +203,13 @@ public class ZtRefitScreen extends GunRefitScreen {
      * 把词接回来——只在 {@link #selectSlot} 里清空，避免装完一件就把搜索词丢了。</p>
      */
     private void addSearchBox() {
+        // 概览态压根不建这个控件。候选框都隐藏了，搜索自然无从谈起；留着的话它会被
+        // Screen 当成普通 widget 画在 3D 画面上（我们的面板这时候不画），还能点、
+        // 还能聚焦 —— 一旦聚焦，keyPressed 就会把按键让给它，槽位快捷键全失灵。
+        if (RefitTransform.getCurrentTransformType() == AttachmentType.NONE) {
+            this.searchBox = null;
+            return;
+        }
         Rect rect = searchRect();
         EditBox box = new EditBox(this.font, rect.x(), rect.y(), rect.w(), rect.h(),
                 Component.translatable("gui.z_tweaks.refit.search.hint"));
