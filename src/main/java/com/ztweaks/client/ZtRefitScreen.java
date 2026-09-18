@@ -56,9 +56,43 @@ import java.util.Map;
 public class ZtRefitScreen extends GunRefitScreen {
 
     private static final int SLOT = 22;
-    private static final int ROW_H = 20;
+    private static final int ROW_H = 19;
     private static final int DETAIL_H = 68;
     private static final int PAD = 6;
+    /** 候选面板宽度与内部两栏高度：绘制与命中检测共用 {@link #listRect()}，不再各写一份。 */
+    private static final int LIST_W = 168;
+    private static final int LIST_HEADER = 15;
+    private static final int LIST_FOOTER = 11;
+
+    // ------------------------------------------------------------------ 调色板
+    // 深色玻璃面板 + 金色强调色：与 TACZ 军事风一致，同时把原来散落各处的魔法色值收拢到一处。
+    // 半透明由 GUI 渲染管线正常混合（GUI pass 默认开 blend）。
+
+    /** 面板主体：上浅下深的纵向渐变。 */
+    private static final int PANEL_TOP = 0xD2181C21;
+    private static final int PANEL_BOTTOM = 0xD20C0E11;
+    /** 面板外描边（1px，半透明白发丝线）与强调描边。 */
+    private static final int HAIRLINE = 0x38FFFFFF;
+    private static final int BORDER_STRONG = 0xFF353B42;
+    /** 金色强调（选中态、标题、焦点）。 */
+    private static final int ACCENT = 0xFFFFC64A;
+    private static final int ACCENT_SOFT = 0x40FFC64A;
+    /** 文字三级灰阶：正文、次要、失效。 */
+    private static final int TEXT = 0xFFE8E8E8;
+    private static final int TEXT_DIM = 0xFFA8AEB5;
+    private static final int TEXT_MUTED = 0xFF6E7479;
+    /** Pros/Cons 沿用 TACZ 的红绿语义，只是降低一点饱和度避免刺眼。 */
+    private static final int GOOD = 0xFF5FD96A;
+    private static final int BAD = 0xFFFF6E6E;
+    /** 悬停行叠加与不可用底色。 */
+    private static final int HOVER_OVERLAY = 0x22FFFFFF;
+    private static final int TRACK_BG = 0x33FFFFFF;
+
+    // 本帧待渲染的 tooltip：后画的悬浮层必须在所有面板之后才不会被盖住，
+    // 所以绘制阶段只登记，最后由 render() 末尾统一 flush。
+    private Component pendingTooltip = null;
+    private int tooltipX = 0;
+    private int tooltipY = 0;
 
     private final List<ItemStack> candidates = new ArrayList<>();
     private final List<Integer> candidateInvSlots = new ArrayList<>();
@@ -374,6 +408,9 @@ public class ZtRefitScreen extends GunRefitScreen {
         if (samplesDirty && ZtConfig.DEBUG_SAMPLES.get()) {
             computeSamples();
         }
+        pendingTooltip = null;
+        // 枪本体是 3D 世界里的渲染，压一层极淡的上下暗角把界面压出层次，同时不遮挡枪
+        drawVignette(graphics);
         drawSlotBar(graphics, mouseX, mouseY);
         drawCandidateList(graphics, mouseX, mouseY);
         syncPreview();
@@ -382,6 +419,30 @@ public class ZtRefitScreen extends GunRefitScreen {
             GunPropertyDiagrams.draw(graphics, this.font, 11, 96);
         }
         drawOverlay(graphics);
+        flushTooltip(graphics);
+    }
+
+    /**
+     * 顶部/底部极淡的纵向暗角。中段完全透明，保证转枪时枪不被糊住 ——
+     * 只给"上缘调色、下缘操作区"提供一点对比度。
+     */
+    private void drawVignette(GuiGraphics graphics) {
+        graphics.fillGradient(0, 0, this.width, 52, 0x99000000, 0x00000000);
+        graphics.fillGradient(0, detailY() - 6, this.width, this.height, 0x00000000, 0xAA000000);
+    }
+
+    /** 登记一个本帧末尾才渲染的 tooltip（绘制顺序：必须先画完所有面板）。 */
+    private void tooltip(Component text, int x, int y) {
+        pendingTooltip = text;
+        tooltipX = x;
+        tooltipY = y;
+    }
+
+    private void flushTooltip(GuiGraphics graphics) {
+        if (pendingTooltip != null) {
+            graphics.renderTooltip(this.font, pendingTooltip, tooltipX, tooltipY);
+            pendingTooltip = null;
+        }
     }
 
     private int slotBarY() {
@@ -392,75 +453,168 @@ public class ZtRefitScreen extends GunRefitScreen {
         return slotBarY() - DETAIL_H - 4;
     }
 
+    /** 槽位条的水平起点与列间距：绘制与命中检测共用，杜绝两处各写一份几何。 */
+    private int[] slotBarGeometry(List<AttachmentType> types) {
+        int step = slotStep(types);
+        return new int[]{(this.width - types.size() * step) / 2, step};
+    }
+
+    /** 第 index 个槽位的方块矩形（列内居中，列宽大于方块时两侧留白对称）。 */
+    private Rect slotRect(List<AttachmentType> types, int index) {
+        int[] geo = slotBarGeometry(types);
+        int cell = geo[0] + index * geo[1];
+        return new Rect(cell + (geo[1] - SLOT) / 2, slotBarY(), SLOT, SLOT);
+    }
+
     private void drawSlotBar(GuiGraphics graphics, int mouseX, int mouseY) {
         List<AttachmentType> types = slotTypes();
-        int step = slotStep(types);
+        int[] geo = slotBarGeometry(types);
+        int step = geo[1];
+        int x0 = geo[0];
         int barWidth = types.size() * step;
-        int x0 = (this.width - barWidth) / 2;
         int y = slotBarY();
         AttachmentType current = RefitTransform.getCurrentTransformType();
-        IGun iGun = IGun.getIGunOrNull(gunStack());
+        ItemStack gun = gunStack();
+        IGun iGun = IGun.getIGunOrNull(gun);
 
-        graphics.fill(x0 - 4, y - 12, x0 + barWidth + 4, y + SLOT + 4, 0xB0101010);
+        // 整条槽位条坐在一块圆角渐变面板上：3D 画面上直接摆一排方块会"飘"，加个托底就有层次
+        panel(graphics, x0 - 6, y - 15, barWidth + 12, SLOT + 22);
+
         for (int i = 0; i < types.size(); i++) {
             AttachmentType type = types.get(i);
-            int x = x0 + i * step;
-            boolean hovered = mouseX >= x && mouseX < x + SLOT && mouseY >= y && mouseY < y + SLOT;
+            Rect rect = slotRect(types, i);
+            boolean hovered = rect.contains(mouseX, mouseY) && !dragging;
             boolean isCurrent = type == current;
-            boolean allowed = iGun != null && iGun.allowAttachmentType(gunStack(), type);
+            boolean allowed = iGun != null && iGun.allowAttachmentType(gun, type);
 
-            int background = isCurrent ? 0xFF2F5F9F : (hovered ? 0xFF454545 : 0xFF1C1C1C);
-            graphics.fill(x, y, x + SLOT, y + SLOT, background);
-            border(graphics, x, y, SLOT, SLOT, allowed ? 0xFF7F7F7F : 0xFF402020);
-            graphics.drawCenteredString(this.font, truncate(slotName(type), step - 2),
-                    x + SLOT / 2, y - 8, allowed ? 0xFFCCCCCC : 0xFF885555);
-
-            ItemStack installed = iGun == null ? ItemStack.EMPTY : iGun.getAttachment(gunStack(), type);
-            if (!installed.isEmpty()) {
-                graphics.renderItem(installed, x + 3, y + 3);
+            if (allowed) {
+                int fill = isCurrent ? ACCENT_SOFT : (hovered ? HOVER_OVERLAY : 0x22000000);
+                roundedFill(graphics, rect.x(), rect.y(), rect.w(), rect.h(), fill);
+                roundedBorder(graphics, rect.x(), rect.y(), rect.w(), rect.h(),
+                        isCurrent ? ACCENT : (hovered ? 0x88FFFFFF : BORDER_STRONG));
             } else {
-                graphics.drawCenteredString(this.font, "+", x + SLOT / 2, y + 7, 0xFF808080);
+                // 不支持的槽位：压暗 + 红褐描边，一眼看出点不动（点了也会弹提示）
+                roundedFill(graphics, rect.x(), rect.y(), rect.w(), rect.h(), 0x55000000);
+                roundedBorder(graphics, rect.x(), rect.y(), rect.w(), rect.h(), 0xFF3A2424);
+            }
+
+            ItemStack installed = iGun == null ? ItemStack.EMPTY : iGun.getAttachment(gun, type);
+            if (!installed.isEmpty()) {
+                graphics.renderItem(installed, rect.x() + 3, rect.y() + 3);
+            } else {
+                graphics.drawCenteredString(this.font, "+", rect.x() + rect.w() / 2, rect.y() + 7,
+                        allowed ? TEXT_MUTED : 0xFF5A3A3A);
+            }
+
+            String label = truncate(slotName(type), step - 2);
+            int labelColor = !allowed ? 0xFF8A5A5A : (isCurrent ? ACCENT : (hovered ? TEXT : TEXT_DIM));
+            graphics.drawCenteredString(this.font, label, rect.x() + rect.w() / 2, y - 10, labelColor);
+            // 当前槽位用名字下的强调线标记，比整块高亮更克制、也更不抢枪的视觉
+            if (isCurrent) {
+                int w = this.font.width(label);
+                int cx = rect.x() + rect.w() / 2;
+                graphics.fill(cx - w / 2, y - 2, cx + w / 2, y - 1, ACCENT);
+            }
+
+            if (hovered) {
+                tooltip(Component.literal(allowed ? slotName(type)
+                        : I18n.get("gui.z_tweaks.refit.msg.slot_not_allowed", slotName(type))),
+                        (int) mouseX, (int) mouseY);
             }
         }
     }
 
+    /** 候选面板矩形：绘制、点击命中、滚轮判定三者共用同一来源。 */
+    private Rect listRect() {
+        int height = Math.max(64, detailY() - 8 - 26);
+        return new Rect(this.width - LIST_W - PAD, 26, LIST_W, height);
+    }
+
+    /** 候选面板第 i 行的矩形（i 从 0 开始，不含滚动偏移）。两行之间留 2px 缝，观感更透气。 */
+    private static Rect rowRect(Rect list, int i) {
+        return new Rect(list.x() + 3, list.y() + LIST_HEADER + i * ROW_H, list.w() - 6, ROW_H - 2);
+    }
+
     private void drawCandidateList(GuiGraphics graphics, int mouseX, int mouseY) {
-        int panelWidth = 156;
-        int x = this.width - panelWidth - PAD;
-        int y = 26;
-        int height = Math.max(40, detailY() - 8 - y);
+        Rect list = listRect();
+        int x = list.x();
+        int y = list.y();
+        int height = list.h();
+        int right = x + list.w();
 
-        graphics.fill(x, y, x + panelWidth, y + height, 0xB0101010);
-        graphics.drawString(this.font, I18n.get("gui.z_tweaks.refit.candidates", candidates.size()),
-                x + 4, y + 3, 0xFFFFD700, true);
+        panel(graphics, x, y, list.w(), height);
 
-        int listTop = y + 14;
-        int rows = Math.max(1, (height - 26) / ROW_H);
+        // 标题 + 数量徽标（数量是玩家最关心的信息，单独给它一个胶囊）
+        graphics.drawString(this.font, I18n.get("gui.z_tweaks.refit.candidates.title"), x + 6, y + 4, ACCENT, true);
+        String count = String.valueOf(candidates.size());
+        int badgeW = this.font.width(count) + 9;
+        int badgeX = right - 7 - badgeW;
+        roundedFill(graphics, badgeX, y + 2, badgeW, 10, 0x40000000);
+        roundedBorder(graphics, badgeX, y + 2, badgeW, 10, HAIRLINE);
+        graphics.drawCenteredString(this.font, count, badgeX + badgeW / 2, y + 3, TEXT_DIM);
+        graphics.fill(x + 4, y + LIST_HEADER - 3, right - 4, y + LIST_HEADER - 2, HAIRLINE);
+
+        int rows = visibleRows();
         int maxScroll = Math.max(0, candidates.size() - rows);
         scroll = Math.max(0, Math.min(scroll, maxScroll));
         hoveredRow = -1;
+        int listTop = y + LIST_HEADER;
 
+        if (candidates.isEmpty()) {
+            graphics.drawString(this.font, I18n.get("gui.z_tweaks.refit.candidates.empty"),
+                    x + 6, listTop + 4, TEXT_MUTED, false);
+        }
+
+        // 裁剪：滚动/悬停的行不会越出面板边线
+        graphics.enableScissor(x + 1, listTop, right - 1, listTop + rows * ROW_H);
         for (int i = 0; i < rows && scroll + i < candidates.size(); i++) {
             int index = scroll + i;
-            int rowY = listTop + i * ROW_H;
+            Rect row = rowRect(list, i);
             boolean isSelected = index == selected;
-            boolean hovered = mouseX >= x + 2 && mouseX < x + panelWidth - 2 && mouseY >= rowY && mouseY < rowY + ROW_H - 1;
+            boolean hovered = !dragging && row.contains(mouseX, mouseY);
             if (hovered) {
                 hoveredRow = index;
             }
-            if (isSelected || hovered) {
-                graphics.fill(x + 2, rowY, x + panelWidth - 2, rowY + ROW_H - 1, isSelected ? 0xFF2F5F9F : 0xFF3A3A3A);
+            boolean owned = candidateInvSlots.get(index) >= 0;
+
+            if (isSelected) {
+                roundedFill(graphics, row.x(), row.y(), row.w(), row.h(), ACCENT_SOFT);
+            } else if (hovered) {
+                roundedFill(graphics, row.x(), row.y(), row.w(), row.h(), HOVER_OVERLAY);
             }
-            graphics.renderItem(candidates.get(index), x + 4, rowY + 1);
+            // 左侧强调竖条：选中金色、悬停白 —— 比整行铺色精细，也不干扰阅读
+            if (isSelected || hovered) {
+                graphics.fill(row.x(), row.y() + 1, row.x() + 2, row.y() + row.h() - 1,
+                        isSelected ? ACCENT : 0x88FFFFFF);
+            }
+            graphics.renderItem(candidates.get(index), row.x() + 5, row.y() + 1);
             // 不在背包里的条目压暗：虚拟装配能预览它，但点下去服务端装不上（见 installSelected），
             // 不压暗会让"能预览"被误读成"能装"。原因角标归 §3.3-1 / M3。
-            boolean owned = candidateInvSlots.get(index) >= 0;
             graphics.drawString(this.font,
-                    this.font.plainSubstrByWidth(nameOf(candidates.get(index)), panelWidth - 34),
-                    x + 24, rowY + 6, owned ? 0xFFFFFFFF : 0xFF9A9A9A, false);
+                    this.font.plainSubstrByWidth(nameOf(candidates.get(index)), row.w() - 34),
+                    row.x() + 24, row.y() + 5, owned ? TEXT : TEXT_MUTED, false);
+            if (!owned) {
+                graphics.fill(row.x() + row.w() - 7, row.y() + row.h() / 2, row.x() + row.w() - 5,
+                        row.y() + row.h() / 2 + 2, BAD);
+            }
+            if (hovered) {
+                tooltip(Component.literal(nameOf(candidates.get(index))), (int) mouseX, (int) mouseY);
+            }
         }
+        graphics.disableScissor();
+
+        if (maxScroll > 0) {
+            int trackX = right - 3;
+            int trackTop = listTop + 1;
+            int trackH = rows * ROW_H - 2;
+            graphics.fill(trackX, trackTop, trackX + 2, trackTop + trackH, TRACK_BG);
+            int thumbH = Math.max(8, trackH * rows / candidates.size());
+            int thumbY = trackTop + Math.round((trackH - thumbH) * (scroll / (float) maxScroll));
+            graphics.fill(trackX, thumbY, trackX + 2, thumbY + thumbH, 0xAAFFC64A);
+        }
+
         graphics.drawString(this.font, I18n.get("gui.z_tweaks.refit.candidates.scroll"),
-                x + 4, y + height - 10, 0xFF808080, false);
+                x + 6, y + height - LIST_FOOTER + 2, TEXT_MUTED, false);
     }
 
     /**
@@ -485,57 +639,111 @@ public class ZtRefitScreen extends GunRefitScreen {
         int width = this.width - PAD * 2;
         int y = detailY();
         int height = DETAIL_H;
-        graphics.fill(x, y, x + width, y + height, 0xC0101010);
-        border(graphics, x, y, width, height, 0xFF555555);
+        panel(graphics, x, y, width, height);
+        // 左侧一道金色竖条，把"这里是当前查看的配件"点明
+        graphics.fill(x, y + 1, x + 2, y + height - 1, ACCENT);
 
         int leftWidth = (int) (width * 0.40f);
-        int line = y + 4;
+        int textW = leftWidth - 10;
 
         if (!candidates.isEmpty()) {
             ItemStack candidate = candidates.get(Math.min(selected, candidates.size() - 1));
-            graphics.drawString(this.font, I18n.get("gui.z_tweaks.refit.candidate", nameOf(candidate)),
-                    x + 4, line, 0xFFFFD700, false);
-            line += 10;
+            // 名称行：图标 + 名字并排，比纯文字更易扫读
+            graphics.renderItem(candidate, x + 6, y + 4);
+            graphics.drawString(this.font, truncate(nameOf(candidate), textW - 20), x + 26, y + 8, ACCENT, false);
+            int line = y + 24;
             for (String desc : describe(candidate)) {
-                graphics.drawString(this.font, truncate(desc, leftWidth - 8), x + 4, line, 0xFFAAAAAA, false);
+                graphics.drawString(this.font, truncate(desc, textW), x + 6, line, TEXT_DIM, false);
                 line += 10;
             }
             for (int i = 0; i < Math.min(2, neutral.size()); i++) {
                 graphics.drawString(this.font,
-                        truncate(I18n.get("gui.z_tweaks.refit.neutral", neutral.get(i)), leftWidth - 8),
-                        x + 4, line, 0xFF777777, false);
+                        truncate(I18n.get("gui.z_tweaks.refit.neutral", neutral.get(i)), textW),
+                        x + 6, line, TEXT_MUTED, false);
                 line += 10;
             }
             if (ZtConfig.DEBUG_SAMPLES.get()) {
                 for (String sample : samples) {
                     graphics.drawString(this.font,
-                            truncate(I18n.get("gui.z_tweaks.refit.native", sample), leftWidth - 8),
-                            x + 4, line, 0xFF00AAAA, false);
+                            truncate(I18n.get("gui.z_tweaks.refit.native", sample), textW),
+                            x + 6, line, 0xFF4FC3C3, false);
                     line += 10;
                 }
             }
         }
 
+        // Pros/Cons 两栏：标题带计数 + 同色下划线，条目用色标引导
         int columnX = x + leftWidth + 6;
         int columnWidth = (width - leftWidth - 20) / 2;
-        graphics.drawString(this.font, I18n.get("gui.z_tweaks.refit.pros", pros.size()),
-                columnX, y + 4, 0xFF55FF55, false);
-        graphics.drawString(this.font, I18n.get("gui.z_tweaks.refit.cons", cons.size()),
-                columnX + columnWidth + 8, y + 4, 0xFFFF5555, false);
-        for (int i = 0; i < pros.size() && i < 4; i++) {
-            graphics.drawString(this.font, truncate(pros.get(i), columnWidth - 4), columnX + 2, y + 15 + i * 10, 0xFF55FF55, false);
-        }
-        for (int i = 0; i < cons.size() && i < 4; i++) {
-            graphics.drawString(this.font, truncate(cons.get(i), columnWidth - 4),
-                    columnX + columnWidth + 10, y + 15 + i * 10, 0xFFFF5555, false);
-        }
+        int rightColumnX = columnX + columnWidth + 8;
+        int entryTop = y + 19;
+        // 条目数按按钮位置反推，避免最后一行压到按钮上（按钮挪了这里自动跟着变）
+        int entryLimit = Math.max(1, (installRect().y() - 2 - entryTop) / 10);
+        drawPropertyColumn(graphics, columnX, y + 5, columnWidth, entryTop, entryLimit, pros,
+                I18n.get("gui.z_tweaks.refit.pros", pros.size()), GOOD);
+        drawPropertyColumn(graphics, rightColumnX, y + 5, columnWidth, entryTop, entryLimit, cons,
+                I18n.get("gui.z_tweaks.refit.cons", cons.size()), BAD);
 
         Rect installRect = installRect();
         Rect unloadRect = unloadRect();
+        boolean installEnabled = selectedOwned();
+        boolean unloadEnabled = canUnload();
         button(graphics, installRect, I18n.get("gui.z_tweaks.refit.install"),
-                installRect.contains(mouseX, mouseY), true);
+                installRect.contains(mouseX, mouseY) && !dragging, true, installEnabled);
         button(graphics, unloadRect, I18n.get("gui.z_tweaks.refit.unload"),
-                unloadRect.contains(mouseX, mouseY), false);
+                unloadRect.contains(mouseX, mouseY) && !dragging, false, unloadEnabled);
+        // 不可用时把原因说清楚：悬停给提示，而不是点了没反应
+        if (!dragging && installRect.contains(mouseX, mouseY) && !installEnabled) {
+            tooltip(Component.literal(I18n.get("gui.z_tweaks.refit.msg.not_owned", nameOf(selectedStack()))),
+                    (int) mouseX, (int) mouseY);
+        }
+        if (!dragging && unloadRect.contains(mouseX, mouseY) && !unloadEnabled) {
+            // 禁用原因分两种：概览态（没选槽位）与"选中的槽位是空的"，提示文案不能混用
+            tooltip(Component.literal(I18n.get(RefitTransform.getCurrentTransformType() == AttachmentType.NONE
+                            ? "gui.z_tweaks.refit.msg.overview"
+                            : "gui.z_tweaks.refit.msg.nothing_to_unload")),
+                    (int) mouseX, (int) mouseY);
+        }
+    }
+
+    /** 一栏属性：标题 + 同色下划线 + 逐条色标。{@code limit} 由调用方按可用高度算出。 */
+    private void drawPropertyColumn(GuiGraphics graphics, int x, int titleY, int width, int entryTop,
+                                    int limit, List<String> entries, String title, int color) {
+        graphics.drawString(this.font, title, x, titleY, color, false);
+        graphics.fill(x, titleY + 10, x + width, titleY + 11, (color & 0x00FFFFFF) | 0x50000000);
+        for (int i = 0; i < entries.size() && i < limit; i++) {
+            int rowY = entryTop + i * 10;
+            graphics.fill(x + 1, rowY + 3, x + 3, rowY + 5, color);
+            graphics.drawString(this.font, truncate(entries.get(i), width - 9), x + 7, rowY, color, false);
+        }
+    }
+
+    /** 当前选中的候选配件栈（越界时兜底到最后一个）。 */
+    private ItemStack selectedStack() {
+        if (candidates.isEmpty()) {
+            return ItemStack.EMPTY;
+        }
+        return candidates.get(Math.min(selected, candidates.size() - 1));
+    }
+
+    /** 选中候选是否在背包里。不在就发不出包（服务端只认自己那份背包），按钮据此禁用。 */
+    private boolean selectedOwned() {
+        if (candidates.isEmpty()) {
+            return false;
+        }
+        int index = Math.min(selected, candidates.size() - 1);
+        return index < candidateInvSlots.size() && candidateInvSlots.get(index) >= 0;
+    }
+
+    /** 当前槽位是否有可卸下的配件。概览态或空槽一律禁用卸载按钮。 */
+    private boolean canUnload() {
+        AttachmentType type = RefitTransform.getCurrentTransformType();
+        if (type == AttachmentType.NONE) {
+            return false;
+        }
+        ItemStack gun = gunStack();
+        IGun iGun = IGun.getIGunOrNull(gun);
+        return iGun != null && !iGun.getAttachment(gun, type).isEmpty();
     }
 
     /**
@@ -543,16 +751,45 @@ public class ZtRefitScreen extends GunRefitScreen {
      * 弹条是给玩家看的正常反馈，不受调试开关影响。
      */
     private void drawOverlay(GuiGraphics graphics) {
-        int y = 6;
         if (ZtConfig.DEBUG_HUD.get()) {
-            for (String text : debugLines()) {
-                graphics.drawString(this.font, text, PAD, y, 0xFF00FFFF, true);
+            List<String> lines = debugLines();
+            int widest = 0;
+            for (String text : lines) {
+                widest = Math.max(widest, this.font.width(text));
+            }
+            // 诊断文字直接盖在世界上会糊成一片，垫一层半透明底衬
+            roundedFill(graphics, PAD - 3, 4, widest + 8, lines.size() * 10 + 6, 0x90000000);
+            roundedBorder(graphics, PAD - 3, 4, widest + 8, lines.size() * 10 + 6, HAIRLINE);
+            int y = 8;
+            for (String text : lines) {
+                graphics.drawString(this.font, text, PAD, y, 0xFF7FE7FF, true);
                 y += 10;
             }
         }
-        if (!popup.isEmpty() && System.currentTimeMillis() < popupUntil) {
-            graphics.drawString(this.font, popup, PAD, y + 4, 0xFFFFAA00, true);
+        drawToast(graphics);
+    }
+
+    /**
+     * 操作反馈弹条：贴在详情条正上方居中，最后 0.6 秒淡出。
+     * 比"左上角一行会突然消失的字"更像正经反馈，也不挡枪。
+     */
+    private void drawToast(GuiGraphics graphics) {
+        long remaining = popupUntil - System.currentTimeMillis();
+        if (popup.isEmpty() || remaining <= 0) {
+            return;
         }
+        int alpha = (int) (Math.min(1.0f, remaining / 600.0f) * 255.0f);
+        if (alpha <= 4) {
+            return;
+        }
+        int w = this.font.width(popup) + 18;
+        int h = 14;
+        int x = (this.width - w) / 2;
+        int y = detailY() - h - 8;
+        roundedFill(graphics, x, y, w, h, (alpha << 24) | 0x14171B);
+        roundedBorder(graphics, x, y, w, h, (alpha << 24) | 0x4A5158);
+        graphics.fill(x + 1, y + 1, x + 3, y + h - 1, (alpha << 24) | 0xFFC64A);
+        graphics.drawCenteredString(this.font, popup, x + w / 2 + 1, y + 3, (alpha << 24) | 0xFFD98A);
     }
 
     /** 诊断 HUD 的每一行：mixin 是否注入、相机读数、取景进度、字体与按键速查。 */
@@ -590,26 +827,19 @@ public class ZtRefitScreen extends GunRefitScreen {
         if (super.mouseClicked(mouseX, mouseY, button)) {
             return true;
         }
-        // 槽位条
+        // 槽位条（几何与绘制同源：slotRect）
         List<AttachmentType> types = slotTypes();
-        int step = slotStep(types);
-        int x0 = (this.width - types.size() * step) / 2;
-        int y = slotBarY();
         for (int i = 0; i < types.size(); i++) {
-            int x = x0 + i * step;
-            if (hit(mouseX, mouseY, x, y, SLOT, SLOT)) {
+            if (slotRect(types, i).contains(mouseX, mouseY)) {
                 selectSlot(types.get(i));
                 return true;
             }
         }
-        // 候选列表
-        int panelWidth = 156;
-        int listX = this.width - panelWidth - PAD;
-        int listTop = 26 + 14;
-        int rows = Math.max(1, (Math.max(40, detailY() - 8 - 26) - 26) / ROW_H);
+        // 候选列表（几何与绘制同源：rowRect）
+        Rect list = listRect();
+        int rows = visibleRows();
         for (int i = 0; i < rows && scroll + i < candidates.size(); i++) {
-            int rowY = listTop + i * ROW_H;
-            if (hit(mouseX, mouseY, listX + 2, rowY, panelWidth - 4, ROW_H - 1)) {
+            if (rowRect(list, i).contains(mouseX, mouseY)) {
                 selected = scroll + i;
                 samplesDirty = true;
                 return true;
@@ -663,9 +893,8 @@ public class ZtRefitScreen extends GunRefitScreen {
 
     @Override
     public boolean mouseScrolled(double mouseX, double mouseY, double delta) {
-        int panelWidth = 156;
-        int listX = this.width - panelWidth - PAD;
-        if (mouseX >= listX) {
+        // 指针在候选面板内才翻列表，其余位置一律给相机缩放 —— 与视觉边界一致，不会误触
+        if (listRect().contains(mouseX, mouseY)) {
             scroll -= (int) Math.signum(delta);
             return true;
         }
@@ -802,10 +1031,9 @@ public class ZtRefitScreen extends GunRefitScreen {
         }
     }
 
-    /** 候选面板当前能显示几行（面板几何与 drawCandidateList 保持一致）。 */
+    /** 候选面板当前能显示几行。几何与 {@link #listRect()} 同源，不会与绘制漂移。 */
     private int visibleRows() {
-        int height = Math.max(40, detailY() - 8 - 26);
-        return Math.max(1, (height - 26) / ROW_H);
+        return Math.max(1, (listRect().h() - LIST_HEADER - LIST_FOOTER) / ROW_H);
     }
 
     private void ensureSelectionVisible() {
@@ -818,29 +1046,72 @@ public class ZtRefitScreen extends GunRefitScreen {
     }
 
     private Rect installRect() {
-        return new Rect(PAD + this.width - PAD * 2 - 132, detailY() + DETAIL_H - 15, 62, 13);
+        return new Rect(PAD + this.width - PAD * 2 - 136, detailY() + DETAIL_H - 16, 64, 14);
     }
 
     private Rect unloadRect() {
-        return new Rect(PAD + this.width - PAD * 2 - 68, detailY() + DETAIL_H - 15, 62, 13);
+        return new Rect(PAD + this.width - PAD * 2 - 68, detailY() + DETAIL_H - 16, 64, 14);
     }
 
-    private static boolean hit(double mouseX, double mouseY, int x, int y, int w, int h) {
-        return mouseX >= x && mouseX < x + w && mouseY >= y && mouseY < y + h;
+    // ---------------------------------------------------------------- 绘制原语
+
+    /** 圆角矩形填充：切掉四个角像素。1px 圆角就足够柔和，且不引入任何贴图依赖。 */
+    private static void roundedFill(GuiGraphics graphics, int x, int y, int w, int h, int color) {
+        if (w <= 0 || h <= 0 || (color >>> 24) == 0) {
+            return;
+        }
+        graphics.fill(x + 1, y, x + w - 1, y + h, color);
+        graphics.fill(x, y + 1, x + 1, y + h - 1, color);
+        graphics.fill(x + w - 1, y + 1, x + w, y + h - 1, color);
     }
 
-    private void button(GuiGraphics graphics, Rect rect, String label, boolean hovered, boolean primary) {
-        int color = primary ? (hovered ? 0xFF3F7F3F : 0xFF2F5F2F) : (hovered ? 0xFF7F3F3F : 0xFF5F2F2F);
-        graphics.fill(rect.x(), rect.y(), rect.x() + rect.w(), rect.y() + rect.h(), color);
-        border(graphics, rect.x(), rect.y(), rect.w(), rect.h(), 0xFFAAAAAA);
-        graphics.drawCenteredString(this.font, label, rect.x() + rect.w() / 2, rect.y() + 3, 0xFFFFFFFF);
+    /** 圆角描边，与 {@link #roundedFill} 配套（同样缺角，否则边框会比填充多出一角）。 */
+    private static void roundedBorder(GuiGraphics graphics, int x, int y, int w, int h, int color) {
+        graphics.fill(x + 1, y, x + w - 1, y + 1, color);
+        graphics.fill(x + 1, y + h - 1, x + w - 1, y + h, color);
+        graphics.fill(x, y + 1, x + 1, y + h - 1, color);
+        graphics.fill(x + w - 1, y + 1, x + w, y + h - 1, color);
     }
 
-    private static void border(GuiGraphics graphics, int x, int y, int w, int h, int color) {
-        graphics.fill(x, y, x + w, y + 1, color);
-        graphics.fill(x, y + h - 1, x + w, y + h, color);
-        graphics.fill(x, y, x + 1, y + h, color);
-        graphics.fill(x + w - 1, y, x + w, y + h, color);
+    /** 面板标准外观：上浅下深渐变 + 圆角 + 发丝描边。全场统一，各处不再自己调色。 */
+    private static void panel(GuiGraphics graphics, int x, int y, int w, int h) {
+        graphics.fillGradient(x + 1, y, x + w - 1, y + h, PANEL_TOP, PANEL_BOTTOM);
+        graphics.fill(x, y + 1, x + 1, y + h - 1, PANEL_TOP);
+        graphics.fill(x + w - 1, y + 1, x + w, y + h - 1, PANEL_BOTTOM);
+        roundedBorder(graphics, x, y, w, h, HAIRLINE);
+    }
+
+    /**
+     * 按钮：常态/悬停/禁用三态。禁用态压暗并去饱和 —— 直接对应"这个动作现在做不了"，
+     * 而不是让玩家点了没反应。
+     */
+    private void button(GuiGraphics graphics, Rect rect, String label, boolean hovered,
+                        boolean primary, boolean enabled) {
+        int top;
+        int bottom;
+        int borderColor;
+        int textColor;
+        if (!enabled) {
+            top = 0x80202428;
+            bottom = 0x80161A1D;
+            borderColor = 0x40FFFFFF;
+            textColor = TEXT_MUTED;
+        } else if (hovered) {
+            top = primary ? 0xFF2F5F3A : 0xFF6F2F2F;
+            bottom = primary ? 0xFF1F3F27 : 0xFF4F1F1F;
+            borderColor = primary ? 0xFF3F9F4F : 0xFFB04A4A;
+            textColor = 0xFFFFFFFF;
+        } else {
+            top = primary ? 0xFF24452C : 0xFF4A2424;
+            bottom = primary ? 0xFF182E1D : 0xFF311818;
+            borderColor = 0x66FFFFFF;
+            textColor = TEXT;
+        }
+        graphics.fillGradient(rect.x() + 1, rect.y(), rect.x() + rect.w() - 1, rect.y() + rect.h(), top, bottom);
+        graphics.fill(rect.x(), rect.y() + 1, rect.x() + 1, rect.y() + rect.h() - 1, top);
+        graphics.fill(rect.x() + rect.w() - 1, rect.y() + 1, rect.x() + rect.w(), rect.y() + rect.h() - 1, bottom);
+        roundedBorder(graphics, rect.x(), rect.y(), rect.w(), rect.h(), borderColor);
+        graphics.drawCenteredString(this.font, label, rect.x() + rect.w() / 2, rect.y() + 4, textColor);
     }
 
     private String nameOf(ItemStack stack) {
