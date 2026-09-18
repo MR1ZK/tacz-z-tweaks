@@ -65,7 +65,7 @@ public class ZtRefitScreen extends GunRefitScreen {
     private static final int LIST_FOOTER = 11;
 
     // ------------------------------------------------------------------ 调色板
-    // 深色玻璃面板 + 金色强调色：与 TACZ 军事风一致，同时把原来散落各处的魔法色值收拢到一处。
+    // 深色玻璃面板 + TACZ 青强调色：与 TACZ 军事风一致，同时把原来散落各处的魔法色值收拢到一处。
     // 半透明由 GUI 渲染管线正常混合（GUI pass 默认开 blend）。
 
     /** 面板主体：上浅下深的纵向渐变。 */
@@ -74,9 +74,14 @@ public class ZtRefitScreen extends GunRefitScreen {
     /** 面板外描边（1px，半透明白发丝线）与强调描边。 */
     private static final int HAIRLINE = 0x38FFFFFF;
     private static final int BORDER_STRONG = 0xFF353B42;
-    /** 金色强调（选中态、标题、焦点）。 */
-    private static final int ACCENT = 0xFFFFC64A;
-    private static final int ACCENT_SOFT = 0x40FFC64A;
+    /**
+     * TACZ 青（选中态、标题、焦点）。取的是 TACZ 自己 HUD 里用来标注"虚拟"备弹的 0x55FFFF ——
+     * 本模组主打虚拟装配，"虚拟"用 TACZ 认的这个颜色最不违和，也比金色更贴军事科技风。
+     */
+    private static final int ACCENT = 0xFF55FFFF;
+    private static final int ACCENT_SOFT = 0x4055FFFF;
+    /** 弹条正文：青的提亮版，保证在深底上依然够亮（原色直接当文字略刺眼）。 */
+    private static final int ACCENT_LIGHT = 0xFFBFF7FF;
     /** 文字三级灰阶：正文、次要、失效。 */
     private static final int TEXT = 0xFFE8E8E8;
     private static final int TEXT_DIM = 0xFFA8AEB5;
@@ -582,7 +587,7 @@ public class ZtRefitScreen extends GunRefitScreen {
             } else if (hovered) {
                 roundedFill(graphics, row.x(), row.y(), row.w(), row.h(), HOVER_OVERLAY);
             }
-            // 左侧强调竖条：选中金色、悬停白 —— 比整行铺色精细，也不干扰阅读
+            // 左侧强调竖条：选中用强调色、悬停白 —— 比整行铺色精细，也不干扰阅读
             if (isSelected || hovered) {
                 graphics.fill(row.x(), row.y() + 1, row.x() + 2, row.y() + row.h() - 1,
                         isSelected ? ACCENT : 0x88FFFFFF);
@@ -610,7 +615,7 @@ public class ZtRefitScreen extends GunRefitScreen {
             graphics.fill(trackX, trackTop, trackX + 2, trackTop + trackH, TRACK_BG);
             int thumbH = Math.max(8, trackH * rows / candidates.size());
             int thumbY = trackTop + Math.round((trackH - thumbH) * (scroll / (float) maxScroll));
-            graphics.fill(trackX, thumbY, trackX + 2, thumbY + thumbH, 0xAAFFC64A);
+            graphics.fill(trackX, thumbY, trackX + 2, thumbY + thumbH, 0xAA55FFFF);
         }
 
         graphics.drawString(this.font, I18n.get("gui.z_tweaks.refit.candidates.scroll"),
@@ -640,7 +645,7 @@ public class ZtRefitScreen extends GunRefitScreen {
         int y = detailY();
         int height = DETAIL_H;
         panel(graphics, x, y, width, height);
-        // 左侧一道金色竖条，把"这里是当前查看的配件"点明
+        // 左侧一道强调色竖条，把"这里是当前查看的配件"点明
         graphics.fill(x, y + 1, x + 2, y + height - 1, ACCENT);
 
         int leftWidth = (int) (width * 0.40f);
@@ -788,8 +793,8 @@ public class ZtRefitScreen extends GunRefitScreen {
         int y = detailY() - h - 8;
         roundedFill(graphics, x, y, w, h, (alpha << 24) | 0x14171B);
         roundedBorder(graphics, x, y, w, h, (alpha << 24) | 0x4A5158);
-        graphics.fill(x + 1, y + 1, x + 3, y + h - 1, (alpha << 24) | 0xFFC64A);
-        graphics.drawCenteredString(this.font, popup, x + w / 2 + 1, y + 3, (alpha << 24) | 0xFFD98A);
+        graphics.fill(x + 1, y + 1, x + 3, y + h - 1, (alpha << 24) | 0x55FFFF);
+        graphics.drawCenteredString(this.font, popup, x + w / 2 + 1, y + 3, (alpha << 24) | 0xBFF7FF);
     }
 
     /** 诊断 HUD 的每一行：mixin 是否注入、相机读数、取景进度、字体与按键速查。 */
