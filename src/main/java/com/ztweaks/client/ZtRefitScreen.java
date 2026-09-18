@@ -6,7 +6,6 @@ import com.tacz.guns.api.item.IAttachment;
 import com.tacz.guns.api.item.IGun;
 import com.tacz.guns.api.item.attachment.AttachmentType;
 import com.tacz.guns.api.item.builder.AmmoItemBuilder;
-import com.tacz.guns.api.item.builder.AmmoItemBuilder;
 import com.tacz.guns.api.item.builder.AttachmentItemBuilder;
 import com.tacz.guns.config.sync.SyncConfig;
 import com.tacz.guns.resource.pojo.data.gun.ExplosionData;
@@ -61,6 +60,8 @@ import java.util.Objects;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 
+import static com.ztweaks.client.ZtUi.*;
+
 /**
  * 原型（throwaway）：接管后的改装界面。
  *
@@ -107,43 +108,13 @@ public class ZtRefitScreen extends GunRefitScreen {
     private static final DecimalFormat PERCENT_FORMAT = new DecimalFormat("#.##%");
     private static final DecimalFormat PERCENT_1_FORMAT = new DecimalFormat("#.#%");
 
-    // ------------------------------------------------------------------ 调色板
-    // 深色玻璃面板 + TACZ 青强调色：与 TACZ 军事风一致，同时把原来散落各处的魔法色值收拢到一处。
-    // 半透明由 GUI 渲染管线正常混合（GUI pass 默认开 blend）。
-
-    /** 面板主体：上浅下深的纵向渐变。 */
-    private static final int PANEL_TOP = 0xD2181C21;
-    private static final int PANEL_BOTTOM = 0xD20C0E11;
-    /** 面板外描边（1px，半透明白发丝线）与强调描边。 */
-    private static final int HAIRLINE = 0x38FFFFFF;
-    private static final int BORDER_STRONG = 0xFF353B42;
-    /**
-     * TACZ 青（选中态、标题、焦点）。取的是 TACZ 自己 HUD 里用来标注"虚拟"备弹的 0x55FFFF ——
-     * 本模组主打虚拟装配，"虚拟"用 TACZ 认的这个颜色最不违和，也比金色更贴军事科技风。
-     */
-    private static final int ACCENT = 0xFF55FFFF;
-    private static final int ACCENT_SOFT = 0x4055FFFF;
-    /** 弹条正文：青的提亮版，保证在深底上依然够亮（原色直接当文字略刺眼）。 */
-    private static final int ACCENT_LIGHT = 0xFFBFF7FF;
-    /** 文字三级灰阶：正文、次要、失效。 */
-    private static final int TEXT = 0xFFE8E8E8;
-    private static final int TEXT_DIM = 0xFFA8AEB5;
-    private static final int TEXT_MUTED = 0xFF6E7479;
-    /** Pros/Cons 沿用 TACZ 的红绿语义，只是降低一点饱和度避免刺眼。 */
-    private static final int GOOD = 0xFF5FD96A;
-    private static final int BAD = 0xFFFF6E6E;
-    /** 悬停行叠加与不可用底色。 */
-    private static final int HOVER_OVERLAY = 0x22FFFFFF;
-    private static final int TRACK_BG = 0x33FFFFFF;
-
     // 本帧待渲染的 tooltip：后画的悬浮层必须在所有面板之后才不会被盖住，
     // 所以绘制阶段只登记，最后由 render() 末尾统一 flush。
     private Component pendingTooltip = null;
     private int tooltipX = 0;
     private int tooltipY = 0;
 
-    private final List<ItemStack> candidates = new ArrayList<>();
-    private final List<Integer> candidateInvSlots = new ArrayList<>();
+    private final List<Candidate> candidates = new ArrayList<>();
 
     private final List<String> pros = new ArrayList<>();
     private final List<String> cons = new ArrayList<>();
@@ -210,10 +181,7 @@ public class ZtRefitScreen extends GunRefitScreen {
     public void init() {
         // 原型：不调用 super.init()，全部自绘。
         this.clearWidgets();
-        this.cachedType = null;
-        this.selected = 0;
-        this.scroll = 0;
-        this.samplesDirty = true;
+        this.invalidateCandidates();
         this.hoveredRow = -1;
         this.lastRowClickTime = 0L;
         this.lastRowClickIndex = -1;
@@ -247,11 +215,7 @@ public class ZtRefitScreen extends GunRefitScreen {
         box.setValue(searchQuery);
         box.setResponder(value -> {
             searchQuery = value;
-            // 候选列表按 cachedType 做缓存，置空才能触发下一帧重建
-            cachedType = null;
-            selected = 0;
-            scroll = 0;
-            samplesDirty = true;
+            invalidateCandidates();
         });
         this.searchBox = box;
         addRenderableWidget(box);
@@ -300,10 +264,7 @@ public class ZtRefitScreen extends GunRefitScreen {
                 sortAscending = true;
             }
         }
-        cachedType = null;
-        selected = 0;
-        scroll = 0;
-        samplesDirty = true;
+        invalidateCandidates();
     }
 
     /** 排序按钮上的文字：字段 + 方向，取 lang（如"名称 A-Z" / "Mod Z-A"）。 */
@@ -400,7 +361,6 @@ public class ZtRefitScreen extends GunRefitScreen {
         AttachmentType type = RefitTransform.getCurrentTransformType();
         if (iGun == null || type == AttachmentType.NONE) {
             candidates.clear();
-            candidateInvSlots.clear();
             cachedType = type;
             return;
         }
@@ -433,11 +393,7 @@ public class ZtRefitScreen extends GunRefitScreen {
         }
         found.sort(candidateComparator());
         candidates.clear();
-        candidateInvSlots.clear();
-        for (Candidate candidate : found) {
-            candidates.add(candidate.stack());
-            candidateInvSlots.add(candidate.invSlot());
-        }
+        candidates.addAll(found);
         selected = 0;
         scroll = 0;
         samplesDirty = true;
@@ -498,7 +454,7 @@ public class ZtRefitScreen extends GunRefitScreen {
     }
 
     private void computeProsConsTaczText() {
-        ItemStack candidate = candidates.get(Math.min(selected, candidates.size() - 1));
+        ItemStack candidate = candidates.get(Math.min(selected, candidates.size() - 1)).stack();
         IAttachment iAttachment = IAttachment.getIAttachmentOrNull(candidate);
         if (iAttachment == null) {
             return;
@@ -543,7 +499,7 @@ public class ZtRefitScreen extends GunRefitScreen {
         if (iGun == null) {
             return;
         }
-        ItemStack candidate = candidates.get(Math.min(selected, candidates.size() - 1));
+        ItemStack candidate = candidates.get(Math.min(selected, candidates.size() - 1)).stack();
         GunData gunData = TimelessAPI.getCommonGunIndex(iGun.getGunId(gun))
                 .map(CommonGunIndex::getGunData).orElse(null);
         if (gunData == null) {
@@ -842,7 +798,7 @@ public class ZtRefitScreen extends GunRefitScreen {
             if (hovered) {
                 hoveredRow = index;
             }
-            boolean owned = candidateInvSlots.get(index) >= 0;
+            boolean owned = candidates.get(index).invSlot() >= 0;
 
             if (isSelected) {
                 roundedFill(graphics, row.x(), row.y(), row.w(), row.h(), ACCENT_SOFT);
@@ -854,18 +810,19 @@ public class ZtRefitScreen extends GunRefitScreen {
                 graphics.fill(row.x(), row.y() + 1, row.x() + 2, row.y() + row.h() - 1,
                         isSelected ? ACCENT : 0x88FFFFFF);
             }
-            graphics.renderItem(candidates.get(index), row.x() + 5, row.y() + 1);
+            graphics.renderItem(candidates.get(index).stack(), row.x() + 5, row.y() + 1);
             if (!owned) {
                 // 图标盖一层半透明黑：虚拟装配能预览它，但点下去服务端装不上（见
                 // installSelected），不标出来会让"能预览"被误读成"能装"。
                 // 只在创造模式看得到 —— 生存模式压根不列没带在身上的。
                 graphics.fill(row.x() + 5, row.y() + 1, row.x() + 21, row.y() + 17, 0x80000000);
             }
-            graphics.drawString(this.font,
-                    this.font.plainSubstrByWidth(nameOf(candidates.get(index)), row.w() - 34),
+            // 名字在 rebuildCandidates 里已经算好存在 Candidate 上，这里直接用，不再逐帧查索引
+            String name = candidates.get(index).name();
+            graphics.drawString(this.font, this.font.plainSubstrByWidth(name, row.w() - 34),
                     row.x() + 24, row.y() + 5, owned ? TEXT : TEXT_MUTED, false);
             if (hovered) {
-                tooltip(Component.literal(nameOf(candidates.get(index))), (int) mouseX, (int) mouseY);
+                tooltip(Component.literal(name), (int) mouseX, (int) mouseY);
             }
         }
         graphics.disableScissor();
@@ -890,7 +847,7 @@ public class ZtRefitScreen extends GunRefitScreen {
     /**
      * 底部这一行右侧的排序按钮：显示当前排序方式（如"名称 A-Z"），点击循环切换。
      *
-     * <p>自绘而非用 {@link #button}：那个 helper 是安装/卸下的绿红语义（primary/secondary），
+     * <p>自绘而非用 {@link ZtUi#button}：那个 helper 是安装/卸下的绿红语义（primary/secondary），
      * 排序是中性控件，套上去会让人误以为它是个"确认/取消"。观感对齐同一行的搜索框。</p>
      */
     private void drawSortButton(GuiGraphics graphics, int mouseX, int mouseY) {
@@ -920,7 +877,7 @@ public class ZtRefitScreen extends GunRefitScreen {
             VirtualAssembly.clear();
             return;
         }
-        VirtualAssembly.setPreview(type, candidates.get(hoveredRow));
+        VirtualAssembly.setPreview(type, candidates.get(hoveredRow).stack());
     }
 
     private void drawDetail(GuiGraphics graphics, int mouseX, int mouseY) {
@@ -959,9 +916,9 @@ public class ZtRefitScreen extends GunRefitScreen {
         // 只会占着参数卡右下的空间。安装/卸载的提示也只跟按钮走。
         if (RefitTransform.getCurrentTransformType() != AttachmentType.NONE) {
             boolean unloadEnabled = canUnload();
-            button(graphics, installRect, I18n.get("gui.z_tweaks.refit.install"),
+            button(graphics, this.font, installRect, I18n.get("gui.z_tweaks.refit.install"),
                     installRect.contains(mouseX, mouseY) && !dragging, true, installEnabled);
-            button(graphics, unloadRect, I18n.get("gui.z_tweaks.refit.unload"),
+            button(graphics, this.font, unloadRect, I18n.get("gui.z_tweaks.refit.unload"),
                     unloadRect.contains(mouseX, mouseY) && !dragging, false, unloadEnabled);
             // 不可用时把原因说清楚：悬停给提示，而不是点了没反应
             if (!dragging && installRect.contains(mouseX, mouseY) && !installEnabled) {
@@ -991,8 +948,7 @@ public class ZtRefitScreen extends GunRefitScreen {
         if (candidates.isEmpty()) {
             return false;
         }
-        int index = Math.min(selected, candidates.size() - 1);
-        return index < candidateInvSlots.size() && candidateInvSlots.get(index) >= 0;
+        return candidates.get(Math.min(selected, candidates.size() - 1)).invSlot() >= 0;
     }
 
     /** 当前槽位是否有可卸下的配件。概览态或空槽一律禁用卸载按钮。 */
@@ -1168,7 +1124,12 @@ public class ZtRefitScreen extends GunRefitScreen {
             } else {
                 // 左键：上下拖 = roll，绕枪械自身长轴（模型 Z 轴）滚转；
                 // 左右拖 = yaw，绕竖直轴环绕。两个自由度已足以到达任意姿态，故不再设"点头"。
-                // 上下取负：按手感反馈反转 —— 鼠标下拖时枪往"看得见的那一面"转，往上拖反之。
+                //
+                // 手感语义（下拖 / 上拖互为反向，凭这个分支里的正负号切换）：
+                // 鼠标下拖 = 枪"看得见的那一面"向观察者翻过来，上拖翻回去。
+                // 取负是 d10311a 按手感反馈从 +fy 定的，也是这里唯一的方向开关，觉得反了改这一个符号即可。
+                // 核查记录：构造（build/classes）与发布 jar（含游戏实例里那份）的 m_7979_ 字节码
+                // 都在 dneg 之后紧跟 dmul + rotateRoll，即本行确实编译进去了。
                 OrbitCamera.rotateRoll((float) (-fy * ZtConfig.ROLL_SPEED.get()));
                 OrbitCamera.rotateY((float) (fx * ZtConfig.YAW_SPEED.get()));
             }
@@ -1277,10 +1238,9 @@ public class ZtRefitScreen extends GunRefitScreen {
             notify(I18n.get("gui.z_tweaks.refit.msg.nothing"));
             return;
         }
-        int index = Math.min(selected, candidates.size() - 1);
-        ItemStack candidate = candidates.get(index);
-        String name = nameOf(candidate);
-        int inventorySlot = candidateInvSlots.get(index);
+        Candidate entry = candidates.get(Math.min(selected, candidates.size() - 1));
+        ItemStack candidate = entry.stack();
+        int inventorySlot = entry.invSlot();
         if (inventorySlot >= 0) {
             AttachmentType type = RefitTransform.getCurrentTransformType();
             // 与原生一致：声音在发包前就放（原生 GunRefitScreen 同款），不等服务端确认。
@@ -1288,7 +1248,7 @@ public class ZtRefitScreen extends GunRefitScreen {
             SoundPlayManager.playerRefitSound(candidate, player, SoundManager.INSTALL_SOUND);
             NetworkHandler.CHANNEL.sendToServer(
                     new ClientMessageRefitGun(inventorySlot, player.getInventory().selected, type));
-            notify(I18n.get("gui.z_tweaks.refit.msg.installed", name));
+            notify(I18n.get("gui.z_tweaks.refit.msg.installed", entry.name()));
             return;
         }
         // 配件不在背包里，就没有能发给服务端的槽位坐标：ClientMessageRefitGun.handle 是拿
@@ -1338,20 +1298,29 @@ public class ZtRefitScreen extends GunRefitScreen {
 
     // ---------------------------------------------------------------- 小工具
 
-    private record Rect(int x, int y, int w, int h) {
-        boolean contains(double mx, double my) {
-            return mx >= x && mx < x + w && my >= y && my < y + h;
-        }
-    }
-
     /** 排序字段：按显示名，还是按模组（配件 id 的命名空间，即定义它的枪包/mod）。 */
     private enum SortField {NAME, MOD}
 
     /**
-     * 候选列表里一行所需的全部信息，在 {@link #rebuildCandidates()} 里一次性算好：
-     * 名字（本地化显示名，排序与绘制共用，避免每行重复查索引）与模组命名空间。
+     * 候选列表里一行所需的全部信息（列表本身就是一份 {@code List<Candidate>}，不再拆成平行列表），
+     * 在 {@link #rebuildCandidates()} 里一次性算好：名字（本地化显示名，排序与绘制共用，
+     * 避免每行重复查索引）、模组命名空间，以及它在背包里的槽位（-1 = 背包里没有）。
      */
     private record Candidate(ItemStack stack, int invSlot, String name, String modId) {
+    }
+
+    /**
+     * 让下一帧重建候选列表并回到列表顶部。
+     *
+     * <p>"列表的输入变了"有三个入口（初始化/切槽位、搜索词、排序方式），原来各抄一份
+     * {@code cachedType = null; selected = 0; scroll = 0; samplesDirty = true;} ——
+     * 漏抄一处就是"改了不生效"，收敛成一个方法。</p>
+     */
+    private void invalidateCandidates() {
+        cachedType = null;
+        selected = 0;
+        scroll = 0;
+        samplesDirty = true;
     }
 
     /** 候选面板当前能显示几行。几何与 {@link #listRect()} 同源，不会与绘制漂移。 */
@@ -1374,67 +1343,6 @@ public class ZtRefitScreen extends GunRefitScreen {
 
     private Rect unloadRect() {
         return new Rect(PAD + this.width - PAD * 2 - 68, detailY() + DETAIL_H - 16, 64, 14);
-    }
-
-    // ---------------------------------------------------------------- 绘制原语
-
-    /** 圆角矩形填充：切掉四个角像素。1px 圆角就足够柔和，且不引入任何贴图依赖。 */
-    private static void roundedFill(GuiGraphics graphics, int x, int y, int w, int h, int color) {
-        if (w <= 0 || h <= 0 || (color >>> 24) == 0) {
-            return;
-        }
-        graphics.fill(x + 1, y, x + w - 1, y + h, color);
-        graphics.fill(x, y + 1, x + 1, y + h - 1, color);
-        graphics.fill(x + w - 1, y + 1, x + w, y + h - 1, color);
-    }
-
-    /** 圆角描边，与 {@link #roundedFill} 配套（同样缺角，否则边框会比填充多出一角）。 */
-    private static void roundedBorder(GuiGraphics graphics, int x, int y, int w, int h, int color) {
-        graphics.fill(x + 1, y, x + w - 1, y + 1, color);
-        graphics.fill(x + 1, y + h - 1, x + w - 1, y + h, color);
-        graphics.fill(x, y + 1, x + 1, y + h - 1, color);
-        graphics.fill(x + w - 1, y + 1, x + w, y + h - 1, color);
-    }
-
-    /** 面板标准外观：上浅下深渐变 + 圆角 + 发丝描边。全场统一，各处不再自己调色。 */
-    private static void panel(GuiGraphics graphics, int x, int y, int w, int h) {
-        graphics.fillGradient(x + 1, y, x + w - 1, y + h, PANEL_TOP, PANEL_BOTTOM);
-        graphics.fill(x, y + 1, x + 1, y + h - 1, PANEL_TOP);
-        graphics.fill(x + w - 1, y + 1, x + w, y + h - 1, PANEL_BOTTOM);
-        roundedBorder(graphics, x, y, w, h, HAIRLINE);
-    }
-
-    /**
-     * 按钮：常态/悬停/禁用三态。禁用态压暗并去饱和 —— 直接对应"这个动作现在做不了"，
-     * 而不是让玩家点了没反应。
-     */
-    private void button(GuiGraphics graphics, Rect rect, String label, boolean hovered,
-                        boolean primary, boolean enabled) {
-        int top;
-        int bottom;
-        int borderColor;
-        int textColor;
-        if (!enabled) {
-            top = 0x80202428;
-            bottom = 0x80161A1D;
-            borderColor = 0x40FFFFFF;
-            textColor = TEXT_MUTED;
-        } else if (hovered) {
-            top = primary ? 0xFF2F5F3A : 0xFF6F2F2F;
-            bottom = primary ? 0xFF1F3F27 : 0xFF4F1F1F;
-            borderColor = primary ? 0xFF3F9F4F : 0xFFB04A4A;
-            textColor = 0xFFFFFFFF;
-        } else {
-            top = primary ? 0xFF24452C : 0xFF4A2424;
-            bottom = primary ? 0xFF182E1D : 0xFF311818;
-            borderColor = 0x66FFFFFF;
-            textColor = TEXT;
-        }
-        graphics.fillGradient(rect.x() + 1, rect.y(), rect.x() + rect.w() - 1, rect.y() + rect.h(), top, bottom);
-        graphics.fill(rect.x(), rect.y() + 1, rect.x() + 1, rect.y() + rect.h() - 1, top);
-        graphics.fill(rect.x() + rect.w() - 1, rect.y() + 1, rect.x() + rect.w(), rect.y() + rect.h() - 1, bottom);
-        roundedBorder(graphics, rect.x(), rect.y(), rect.w(), rect.h(), borderColor);
-        graphics.drawCenteredString(this.font, label, rect.x() + rect.w() / 2, rect.y() + 4, textColor);
     }
 
     private String nameOf(ItemStack stack) {
@@ -1627,7 +1535,7 @@ public class ZtRefitScreen extends GunRefitScreen {
      * 换配件时滚动回到顶部（用名字 + 下标当键，换槽位由 {@link #init()} 归零）。</p>
      */
     private void drawAttachmentInfo(GuiGraphics graphics, int x, int y, int columnWidth) {
-        ItemStack candidate = candidates.get(Math.min(selected, candidates.size() - 1));
+        ItemStack candidate = candidates.get(Math.min(selected, candidates.size() - 1)).stack();
         String key = nameOf(candidate) + "@" + selected;
         if (!key.equals(attachKey)) {
             attachKey = key;
