@@ -6,6 +6,7 @@
   "gui.z_tweaks.refit.hud.camera.off": "关",
   "gui.z_tweaks.refit.hud.mixin.hit": "轨道注入命中=%s  正常",
   "gui.z_tweaks.refit.hud.mixin.miss": "轨道注入命中=0  注入失败",
+  "gui.z_tweaks.refit.hud.virtual": "虚拟装配：命中=%s 重建=%s 预览=%s",
   "gui.z_tweaks.refit.hud.refit": "取景 开屏=%s 切槽=%s",
   "gui.z_tweaks.refit.hud.mode": "Pros/Cons 模式=%s（配置项 config/z_tweaks-client.toml）",
   "gui.z_tweaks.refit.hud.font": "字体测试：中文渲染 ABC",

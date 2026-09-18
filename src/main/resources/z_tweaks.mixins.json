@@ -6,7 +6,8 @@
   "refmap": "z_tweaks.refmap.json",
   "mixins": [],
   "client": [
-    "FirstPersonRenderGunEventMixin"
+    "FirstPersonRenderGunEventMixin",
+    "GunItemRendererWrapperMixin"
   ],
   "injectors": {
     "defaultRequire": 1

@@ -14,6 +14,7 @@ import com.tacz.guns.client.gui.components.refit.HSVSliderGroup;
 import com.tacz.guns.client.resource.GunDisplayInstance;
 import com.tacz.guns.client.resource.index.ClientAttachmentIndex;
 import com.tacz.guns.client.resource.pojo.display.LaserConfig;
+import com.tacz.guns.client.sound.SoundPlayManager;
 import com.tacz.guns.network.NetworkHandler;
 import com.tacz.guns.network.message.ClientMessageRefitGun;
 import com.tacz.guns.network.message.ClientMessageUnloadAttachment;
@@ -23,6 +24,7 @@ import com.tacz.guns.resource.index.CommonAttachmentIndex;
 import com.tacz.guns.resource.index.CommonGunIndex;
 import com.tacz.guns.resource.pojo.data.attachment.AttachmentData;
 import com.tacz.guns.resource.pojo.data.gun.GunData;
+import com.tacz.guns.sound.SoundManager;
 import com.ztweaks.config.ZtConfig;
 import net.minecraft.client.gui.GuiGraphics;
 import net.minecraft.client.player.LocalPlayer;
@@ -47,6 +49,9 @@ import java.util.Map;
  * 布局（三层）、轨道相机（操作 + 诊断读数）、Pros/Cons 文本（复用 TACZ 成品文本）。</p>
  *
  * <p>刻意不调用 {@code super.init()}：原生按钮会叠加到自绘 UI 上（见 ADR-0002）。</p>
+ *
+ * <p>M2：候选列表的悬停行驱动 {@link VirtualAssembly} 做虚拟装配预览 —— 只换渲染件、
+ * 不碰手持物品，原理与护栏见该类注释与 ADR-0004。</p>
  */
 public class ZtRefitScreen extends GunRefitScreen {
 
@@ -66,6 +71,8 @@ public class ZtRefitScreen extends GunRefitScreen {
     private AttachmentType cachedType = null;
     private int selected = 0;
     private int scroll = 0;
+    /** 本帧鼠标悬停的候选行（-1 = 没有）。每帧由 {@link #drawCandidateList} 重算。 */
+    private int hoveredRow = -1;
     private boolean dragging = false;
     private int dragButton = -1;
     private boolean showNativeBars = false;
@@ -88,7 +95,20 @@ public class ZtRefitScreen extends GunRefitScreen {
         this.selected = 0;
         this.scroll = 0;
         this.samplesDirty = true;
+        this.hoveredRow = -1;
+        VirtualAssembly.clear();
         addLaserSliders();
+    }
+
+    /**
+     * 关屏时先撤掉虚拟装配：预览状态不能越过界面生命周期活到世界里去
+     * （渲染入口那边的护栏已经能兜住，这里是第二道）。
+     * {@code super.onClose()} 负责上传镭射色，必须调用。
+     */
+    @Override
+    public void onClose() {
+        VirtualAssembly.clear();
+        super.onClose();
     }
 
     /**
@@ -356,6 +376,7 @@ public class ZtRefitScreen extends GunRefitScreen {
         }
         drawSlotBar(graphics, mouseX, mouseY);
         drawCandidateList(graphics, mouseX, mouseY);
+        syncPreview();
         drawDetail(graphics, mouseX, mouseY);
         if (showNativeBars && ZtConfig.DEBUG_NATIVE_BARS.get()) {
             GunPropertyDiagrams.draw(graphics, this.font, 11, 96);
@@ -417,22 +438,46 @@ public class ZtRefitScreen extends GunRefitScreen {
         int rows = Math.max(1, (height - 26) / ROW_H);
         int maxScroll = Math.max(0, candidates.size() - rows);
         scroll = Math.max(0, Math.min(scroll, maxScroll));
+        hoveredRow = -1;
 
         for (int i = 0; i < rows && scroll + i < candidates.size(); i++) {
             int index = scroll + i;
             int rowY = listTop + i * ROW_H;
             boolean isSelected = index == selected;
             boolean hovered = mouseX >= x + 2 && mouseX < x + panelWidth - 2 && mouseY >= rowY && mouseY < rowY + ROW_H - 1;
+            if (hovered) {
+                hoveredRow = index;
+            }
             if (isSelected || hovered) {
                 graphics.fill(x + 2, rowY, x + panelWidth - 2, rowY + ROW_H - 1, isSelected ? 0xFF2F5F9F : 0xFF3A3A3A);
             }
             graphics.renderItem(candidates.get(index), x + 4, rowY + 1);
+            // 不在背包里的条目压暗：虚拟装配能预览它，但点下去服务端装不上（见 installSelected），
+            // 不压暗会让"能预览"被误读成"能装"。原因角标归 §3.3-1 / M3。
+            boolean owned = candidateInvSlots.get(index) >= 0;
             graphics.drawString(this.font,
                     this.font.plainSubstrByWidth(nameOf(candidates.get(index)), panelWidth - 34),
-                    x + 24, rowY + 6, 0xFFFFFFFF, false);
+                    x + 24, rowY + 6, owned ? 0xFFFFFFFF : 0xFF9A9A9A, false);
         }
         graphics.drawString(this.font, I18n.get("gui.z_tweaks.refit.candidates.scroll"),
                 x + 4, y + height - 10, 0xFF808080, false);
+    }
+
+    /**
+     * 把"鼠标正悬停的那一行"交给 {@link VirtualAssembly}：下一帧渲染管线就用克隆件作画
+     * （手部渲染在 GUI 之前，故有 1 帧延迟，肉眼无感）。
+     *
+     * <p>刻意只驱动 3D 预览、<b>不动 {@code selected}</b>：否则鼠标从列表划向安装按钮的途中
+     * 会把待安装目标一并改掉，容易装错件。详情条仍跟随 {@code selected}，
+     * "悬停实时 diff" 归 §3.2-4（M4）。</p>
+     */
+    private void syncPreview() {
+        AttachmentType type = RefitTransform.getCurrentTransformType();
+        if (hoveredRow < 0 || hoveredRow >= candidates.size() || type == AttachmentType.NONE) {
+            VirtualAssembly.clear();
+            return;
+        }
+        VirtualAssembly.setPreview(type, candidates.get(hoveredRow));
     }
 
     private void drawDetail(GuiGraphics graphics, int mouseX, int mouseY) {
@@ -527,6 +572,8 @@ public class ZtRefitScreen extends GunRefitScreen {
         lines.add(I18n.get(hits > 0
                 ? "gui.z_tweaks.refit.hud.mixin.hit"
                 : "gui.z_tweaks.refit.hud.mixin.miss", hits));
+        lines.add(I18n.get("gui.z_tweaks.refit.hud.virtual",
+                VirtualAssembly.hits(), VirtualAssembly.builds(), VirtualAssembly.previewName()));
         lines.add(I18n.get("gui.z_tweaks.refit.hud.refit",
                 fmt(RefitTransform.getOpeningProgress()), fmt(RefitTransform.getTransformProgress())));
         lines.add(I18n.get("gui.z_tweaks.refit.hud.mode", ZtConfig.PROS_CONS_MODE.get()));
@@ -694,6 +741,9 @@ public class ZtRefitScreen extends GunRefitScreen {
         int inventorySlot = candidateInvSlots.get(index);
         if (inventorySlot >= 0) {
             AttachmentType type = RefitTransform.getCurrentTransformType();
+            // 与原生一致：声音在发包前就放（原生 GunRefitScreen 同款），不等服务端确认。
+            // 音效取自被装配件自己的 pack 定义，我们只负责触发。
+            SoundPlayManager.playerRefitSound(candidate, player, SoundManager.INSTALL_SOUND);
             NetworkHandler.CHANNEL.sendToServer(
                     new ClientMessageRefitGun(inventorySlot, player.getInventory().selected, type));
             notify(I18n.get("gui.z_tweaks.refit.msg.installed", name));
@@ -719,7 +769,12 @@ public class ZtRefitScreen extends GunRefitScreen {
         }
         ItemStack gun = gunStack();
         IGun iGun = IGun.getIGunOrNull(gun);
-        if (iGun == null || iGun.getAttachment(gun, type).isEmpty()) {
+        if (iGun == null) {
+            notify(I18n.get("gui.z_tweaks.refit.msg.overview"));
+            return;
+        }
+        ItemStack installed = iGun.getAttachment(gun, type);
+        if (installed.isEmpty()) {
             notify(I18n.get("gui.z_tweaks.refit.msg.overview"));
             return;
         }
@@ -729,9 +784,11 @@ public class ZtRefitScreen extends GunRefitScreen {
             notify(I18n.get("gui.tacz.gun_refit.unload.no_space"));
             return;
         }
+        // 与原生一致：卸载音效取自被卸下那个配件自己
+        SoundPlayManager.playerRefitSound(installed, player, SoundManager.UNINSTALL_SOUND);
         // 只发包：界面交给服务端回来的 ServerMessageRefreshRefitScreen 刷新（它会对
         // 当前 GunRefitScreen 调 init()）。不再本地抢跑写 NBT —— 服务端一旦拒绝，
-        // 本地会一直显示"已卸下"。
+        // 本地会一直显示"已卸下"。虚拟装配只是渲染件，与这里无关。
         NetworkHandler.CHANNEL.sendToServer(
                 new ClientMessageUnloadAttachment(player.getInventory().selected, type));
         notify(I18n.get("gui.z_tweaks.refit.msg.unloaded", slotName(type)));

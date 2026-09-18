@@ -1,6 +1,6 @@
-# v1 的预览增强采用"模型级轨道相机"（唯一一处 mixin）
+# v1 的预览增强采用"模型级轨道相机"（v1 口径：唯一一处 mixin）
 
-"更好的武器预览"要求在改装界面对枪械做拖拽旋转与滚轮缩放。TACZ 没有提供可包裹其预览渲染的钩子，可选介入点只有两类：**相机级**（`ViewportEvent.ComputeCameraAngles` 叠加偏航/俯仰）会让背景世界一同旋转，需要额外绘制不透明背景遮盖；**模型级**（mixin 注入 `FirstPersonRenderGunEvent.applyFirstPersonPositioningTransform`，在 TACZ 应用改装取景变换之后追加轨道矩阵）只旋转枪械模型，世界保持静止，观感才是"绕枪看"。选择模型级，代价是全项目唯一一处 mixin。
+"更好的武器预览"要求在改装界面对枪械做拖拽旋转与滚轮缩放。TACZ 没有提供可包裹其预览渲染的钩子，可选介入点只有两类：**相机级**（`ViewportEvent.ComputeCameraAngles` 叠加偏航/俯仰）会让背景世界一同旋转，需要额外绘制不透明背景遮盖；**模型级**（mixin 注入 `FirstPersonRenderGunEvent.applyFirstPersonPositioningTransform`，在 TACZ 应用改装取景变换之后追加轨道矩阵）只旋转枪械模型，世界保持静止，观感才是"绕枪看"。选择模型级，代价是全项目唯一一处 mixin。**M2 修订**：本项目现已出现第二处 mixin（悬停虚拟装配，见 ADR-0004）；"唯一一处"的结论仅在 v1 范围内成立。
 
 ## Consequences
 
