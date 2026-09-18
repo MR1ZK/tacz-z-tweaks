@@ -3,22 +3,32 @@
 build/
 out/
 
-# Forge 开发运行目录
+# Forge 开发运行目录（含存档、日志、崩溃报告、生成的 config）
 run/
+run-data/
+
+# datagen 产物
+src/generated/
 
 # IDE
 .idea/
 *.iml
 *.ipr
 *.iws
+*.launch
 .vscode/
 .classpath
 .project
 .settings/
 bin/
 
-# 本地依赖 jar（TACZ 本体不入库）
+# 本地依赖 jar（TACZ 本体不入库；gradle-wrapper.jar 必须保留）
 libs/*.jar
+
+# JVM 崩溃转储
+*.hprof
+hs_err_*.log
+replay_pid*.log
 
 # 系统
 *.log
