@@ -16,8 +16,6 @@
   "gui.z_tweaks.refit.candidates.empty": "这个槽位没有可用配件",
   "gui.z_tweaks.refit.candidates.no_match": "没有匹配的配件",
   "gui.z_tweaks.refit.search.hint": "搜索…",
-  "gui.z_tweaks.refit.gun.rpm": "射速 %s",
-  "gui.z_tweaks.refit.gun.mag": "弹匣 %s",
   "gui.z_tweaks.refit.candidate": "候选：%s",
   "gui.z_tweaks.refit.slot.scope": "瞄具",
   "gui.z_tweaks.refit.slot.muzzle": "枪口",
