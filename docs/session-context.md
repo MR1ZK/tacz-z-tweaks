@@ -7,7 +7,7 @@
 **TACZ: Z-Tweaks** —— Forge 1.20.1 客户端模组，用自绘 GUI 接管 TACZ（Timeless & Classics Guns）的改装界面（Z 键），提供更好的武器预览、更简单的改装流程、更易读的参数。对标 Garry's Mod 的 ARC-9。GPL-3.0。
 
 - 仓库：`github.com/MR1ZK/tacz-z-tweaks`，`main` 分支
-- 已发布：**v0.1.1**（正式 release，tag 即 v0.1.1）；当前开发版本 `0.1.1-hotfix1`（尚未发 release / 打 tag）
+- 已发布：**v0.1.1-hotfix1**（Latest，tag 即 v0.1.1-hotfix1）；上一版正式 release 是 v0.1.1
 - 定位：原型（throwaway）阶段，M0–M2 完成、M3 部分完成，UI 仍按试玩反馈调整
 
 ## 构建与运行
