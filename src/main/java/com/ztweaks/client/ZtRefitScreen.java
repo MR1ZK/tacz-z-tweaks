@@ -699,15 +699,12 @@ public class ZtRefitScreen extends GunRefitScreen {
             notify(I18n.get("gui.z_tweaks.refit.msg.installed", name));
             return;
         }
-        // 创造模式：不用先拿到背包里 —— 直接写客户端这份 NBT（仅供本地预览）
-        IGun iGun = IGun.getIGunOrNull(gunStack());
-        if (player.isCreative() && iGun != null) {
-            iGun.installAttachment(gunStack(), candidate);
-            samplesDirty = true;
-            notify(I18n.get("gui.z_tweaks.refit.msg.installed_local", name));
-            return;
-        }
-        notify(I18n.get("gui.z_tweaks.refit.msg.demo", name));
+        // 配件不在背包里，就没有能发给服务端的槽位坐标：ClientMessageRefitGun.handle 是拿
+        // inventory.getItem(attachmentSlotIndex) 去取配件的，服务端只认自己那份背包。
+        // 早先的写法是直接改客户端这份 NBT 假装装上，结果服务端毫不知情 —— 界面显示装了、
+        // 服务端还是空槽，两边分叉。真正的"悬停虚拟装配"要克隆枪栈再驱动渲染管线（计划 §3.2），
+        // 那属 M2；这里如实报错。
+        notify(I18n.get("gui.z_tweaks.refit.msg.not_owned", name));
     }
 
     private void unloadCurrent() {
@@ -726,15 +723,17 @@ public class ZtRefitScreen extends GunRefitScreen {
             notify(I18n.get("gui.z_tweaks.refit.msg.overview"));
             return;
         }
-        // 真装的走原版包；创造模式下再补一次本地写，接管"本地预览装上去的"那种情况
-        NetworkHandler.CHANNEL.sendToServer(
-                new ClientMessageUnloadAttachment(player.getInventory().selected, type));
-        if (player.isCreative()) {
-            iGun.unloadAttachment(gun, type);
-            samplesDirty = true;
-            notify(I18n.get("gui.z_tweaks.refit.msg.unloaded_local", slotName(type)));
+        // 与原生同款护栏：背包没空位就别发包。服务端那边是 inventory.add(配件) 返回 false
+        // 就**静默什么都不做**（连刷新包都不发），不预检的话点击会像没反应一样。
+        if (player.getInventory().getFreeSlot() == -1) {
+            notify(I18n.get("gui.tacz.gun_refit.unload.no_space"));
             return;
         }
+        // 只发包：界面交给服务端回来的 ServerMessageRefreshRefitScreen 刷新（它会对
+        // 当前 GunRefitScreen 调 init()）。不再本地抢跑写 NBT —— 服务端一旦拒绝，
+        // 本地会一直显示"已卸下"。
+        NetworkHandler.CHANNEL.sendToServer(
+                new ClientMessageUnloadAttachment(player.getInventory().selected, type));
         notify(I18n.get("gui.z_tweaks.refit.msg.unloaded", slotName(type)));
     }
 

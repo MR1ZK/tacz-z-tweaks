@@ -28,11 +28,9 @@
   "gui.z_tweaks.refit.msg.slot_not_allowed": "slot %s not allowed on this gun",
   "gui.z_tweaks.refit.msg.nothing": "nothing to install",
   "gui.z_tweaks.refit.msg.overview": "overview state: nothing to unload",
-  "gui.z_tweaks.refit.msg.installed_local": "installed (creative, local preview): %s",
   "gui.z_tweaks.refit.msg.installed": "installed: %s",
   "gui.z_tweaks.refit.msg.unloaded": "unloaded: %s",
-  "gui.z_tweaks.refit.msg.unloaded_local": "unloaded (creative, local preview): %s",
-  "gui.z_tweaks.refit.msg.demo": "prototype demo: %s is not in the inventory",
+  "gui.z_tweaks.refit.msg.not_owned": "attachment not in inventory, cannot install: %s",
   "gui.z_tweaks.refit.cache_null": "cacheProperty is null",
   "gui.z_tweaks.refit.no_diagrams": "(no diagrams data)"
 }

@@ -28,11 +28,9 @@
   "gui.z_tweaks.refit.msg.slot_not_allowed": "这把枪不支持 %s 槽位",
   "gui.z_tweaks.refit.msg.nothing": "没有可安装的候选配件",
   "gui.z_tweaks.refit.msg.overview": "概览态：没有可卸下的配件",
-  "gui.z_tweaks.refit.msg.installed_local": "已安装（创造模式·本地预览）：%s",
   "gui.z_tweaks.refit.msg.installed": "已安装：%s",
   "gui.z_tweaks.refit.msg.unloaded": "已卸下：%s",
-  "gui.z_tweaks.refit.msg.unloaded_local": "已卸下（创造模式·本地预览）：%s",
-  "gui.z_tweaks.refit.msg.demo": "原型演示：%s 不在背包里",
+  "gui.z_tweaks.refit.msg.not_owned": "配件不在背包里，装不上：%s",
   "gui.z_tweaks.refit.cache_null": "属性缓存为空",
   "gui.z_tweaks.refit.no_diagrams": "（没有属性条数据）"
 }
