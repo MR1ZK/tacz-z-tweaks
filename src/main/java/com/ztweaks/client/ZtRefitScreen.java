@@ -31,6 +31,7 @@ import com.tacz.guns.resource.pojo.data.attachment.AttachmentData;
 import com.tacz.guns.resource.pojo.data.gun.GunData;
 import com.tacz.guns.sound.SoundManager;
 import com.ztweaks.config.ZtConfig;
+import com.mojang.blaze3d.vertex.PoseStack;
 import net.minecraft.Util;
 import net.minecraft.client.gui.GuiGraphics;
 import net.minecraft.client.gui.components.EditBox;
@@ -51,6 +52,7 @@ import org.lwjgl.glfw.GLFW;
 import javax.annotation.Nullable;
 import java.text.DecimalFormat;
 import java.util.ArrayList;
+import java.util.Arrays;
 import java.util.Comparator;
 import java.util.List;
 import java.util.Locale;
@@ -85,14 +87,18 @@ public class ZtRefitScreen extends GunRefitScreen {
     /** 双击阈值，与 MC 原生 AbstractContainerScreen 一致。 */
     private static final long DOUBLE_CLICK_MS = 250L;
     /**
-     * 概览态信息卡的列数、每列行数与行距。
+     * 概览态信息卡：三列（名字+描述 / 参数 / 补充），各列独立滚动。
      *
-     * <p>按钮顶边在 {@code detailY()+52}，行距 11px 时第 5 行会落在 48–57，压到按钮上，
-     * 所以每列 4 行、用 3 列凑够格子（12 格，实际最多 10 行内容）。</p>
+     * <p>文字按 0.8 缩放绘制（MC 字体是位图，缩放后略糊，换来一屏多放两行）。
+     * 行距 11 是缩放后的局部单位，实际约 8.8px；按钮顶边在 {@code detailY()+52}，
+     * 所以每列最多 5 行。</p>
      */
     private static final int INFO_COLUMNS = 3;
-    private static final int INFO_ROWS = 4;
+    private static final int INFO_ROWS = 5;
     private static final int INFO_LINE_H = 11;
+    private static final float INFO_SCALE = 0.8f;
+    /** 第一列（名字 + 描述）要宽一些，折行最吃宽度。 */
+    private static final float[] INFO_COLUMN_SHARE = {1.5f, 1.0f, 1.0f};
     /** 与 TACZ 的 ClientGunTooltip 同款格式器（带 % 后缀 = 自动乘 100，传小数比例进去）。 */
     private static final DecimalFormat DAMAGE_FORMAT = new DecimalFormat("#.##");
     private static final DecimalFormat PERCENT_FORMAT = new DecimalFormat("#.##%");
@@ -162,7 +168,15 @@ public class ZtRefitScreen extends GunRefitScreen {
     private int lastRowClickIndex = -1;
     private int lastRowClickButton = -1;
 
-    private final List<Component> gunInfo = new ArrayList<>();
+    /** 信息卡三列：名字+描述 / 参数 / 补充（第三列暂空，留给以后加数据）。 */
+    private final List<Component> infoMain = new ArrayList<>();
+    private final List<Component> infoStats = new ArrayList<>();
+    private final List<Component> infoExtra = new ArrayList<>();
+    /** 各列独立滚动的偏移量，以及上一帧算出的各列行数（用来夹取偏移）。 */
+    private final int[] infoScroll = new int[INFO_COLUMNS];
+    private int[] infoColumnLines = new int[INFO_COLUMNS];
+    /** 指针当前悬停在哪一列（每帧由 {@link #drawGunInfo} 记下，供滚轮决定滚哪一列）。 */
+    private int infoHoverColumn = -1;
     /** 缓存键：AttachmentDataUtils 是离线全量重算，不能每帧调，按枪 id + NBT 缓存。 */
     @Nullable
     private ResourceLocation gunInfoId = null;
@@ -190,6 +204,7 @@ public class ZtRefitScreen extends GunRefitScreen {
         this.lastRowClickTime = 0L;
         this.lastRowClickIndex = -1;
         this.lastRowClickButton = -1;
+        Arrays.fill(this.infoScroll, 0);
         VirtualAssembly.clear();
         addLaserSliders();
         addSearchBox();
@@ -837,7 +852,7 @@ public class ZtRefitScreen extends GunRefitScreen {
             }
         } else if (RefitTransform.getCurrentTransformType() == AttachmentType.NONE) {
             // 概览态没有候选配件可讲，整条详情条拿来放枪械参数
-            drawGunInfo(graphics, x, y, width);
+            drawGunInfo(graphics, x, y, width, mouseX, mouseY);
         }
 
         // Pros/Cons 两栏：不写"优点 N / 缺点 N"标题，靠栏色（绿/红）与条目前缀区分；
@@ -1083,7 +1098,13 @@ public class ZtRefitScreen extends GunRefitScreen {
             scroll -= (int) Math.signum(delta);
             return true;
         }
-        OrbitCamera.addZoom((float) delta * ZtConfig.ZOOM_STEP.get().floatValue());
+        // 概览态：指针落在详情条上就滚信息卡，滚的是指针所在的那一列
+        if (!candidateListVisible() && detailRect().contains(mouseX, mouseY) && infoHoverColumn >= 0) {
+            infoScroll[infoHoverColumn] -= (int) Math.signum(delta);
+            return true;
+        }
+        // 取负：滚轮向上推 = 拉近（枪变大）
+        OrbitCamera.addZoom((float) -delta * ZtConfig.ZOOM_STEP.get().floatValue());
         return true;
     }
 
@@ -1329,47 +1350,52 @@ public class ZtRefitScreen extends GunRefitScreen {
      * <p>缓存是必须的：{@link AttachmentDataUtils} 每个方法都要遍历全部配件槽位重算，
      * 类注释本身就写了"不应该频繁调用"。这里按枪 id + NBT 缓存，换枪或改装后自动重算。</p>
      */
-    private List<Component> gunInfoLines() {
+    private void buildGunInfo() {
         ItemStack gun = gunStack();
         IGun iGun = IGun.getIGunOrNull(gun);
         if (iGun == null) {
-            gunInfo.clear();
+            infoMain.clear();
+            infoStats.clear();
+            infoExtra.clear();
             gunInfoId = null;
             gunInfoTag = null;
-            return gunInfo;
+            return;
         }
         ResourceLocation id = iGun.getGunId(gun);
         CompoundTag tag = gun.getTag();
         if (id.equals(gunInfoId) && Objects.equals(gunInfoTag, tag)) {
-            return gunInfo;
+            return;
         }
         gunInfoId = id;
         gunInfoTag = tag == null ? null : tag.copy();
-        gunInfo.clear();
+        infoMain.clear();
+        infoStats.clear();
+        infoExtra.clear();
+        // 换了枪就回到各列顶部：上一把枪的滚动位置没有意义
+        Arrays.fill(infoScroll, 0);
 
         CommonGunIndex index = TimelessAPI.getCommonGunIndex(id).orElse(null);
         if (index == null) {
-            return gunInfo;
+            return;
         }
         GunData gunData = index.getGunData();
-        // 配色统一：标签灰、数值白，只有"移动速度"这种负面数值用红
-        gunInfo.add(Component.literal(gun.getHoverName().getString()).withStyle(ChatFormatting.WHITE));
+        // 第一列：名字 + 描述（配色统一：数值白，描述灰）
+        infoMain.add(Component.literal(gun.getHoverName().getString()).withStyle(ChatFormatting.WHITE));
 
         String tooltip = index.getPojo().getTooltip();
         if (tooltip != null) {
-            // 卡片是概览，描述最多两行 —— 三行会把后面的参数挤出格子
             int descLines = 0;
             for (String part : I18n.get(tooltip).split("\n")) {
-                if (part.isBlank() || descLines >= 2) {
+                if (part.isBlank() || descLines >= 3) {
                     continue;
                 }
-                gunInfo.add(Component.literal(part).withStyle(ChatFormatting.GRAY));
+                infoMain.add(Component.literal(part).withStyle(ChatFormatting.GRAY));
                 descLines++;
             }
         }
 
-        // 口径只留文字：弹药图标和弹容在改装界面里由 HUD 管，卡片不重复占两行
-        gunInfo.add(Component.literal(AmmoItemBuilder.create().setId(gunData.getAmmoId()).build()
+        // 第二列：参数。口径只留文字 —— 弹药图标和弹容在改装界面里由 HUD 管
+        infoStats.add(Component.literal(AmmoItemBuilder.create().setId(gunData.getAmmoId()).build()
                 .getHoverName().getString()).withStyle(ChatFormatting.GRAY));
 
         int level = iGun.getLevel(gun);
@@ -1384,8 +1410,8 @@ public class ZtRefitScreen extends GunRefitScreen {
             levelValue = Component.literal(String.format("%d (%.1f%%)", level, percent))
                     .withStyle(ChatFormatting.WHITE);
         }
-        gunInfo.add(labeled("tooltip.tacz.gun.level", levelValue));
-        gunInfo.add(labeled("tooltip.tacz.gun.type",
+        infoStats.add(labeled("tooltip.tacz.gun.level", levelValue));
+        infoStats.add(labeled("tooltip.tacz.gun.type",
                 Component.translatable("tacz.type." + index.getType() + ".name")
                         .withStyle(ChatFormatting.WHITE)));
 
@@ -1399,21 +1425,21 @@ public class ZtRefitScreen extends GunRefitScreen {
                             explosion.getDamage() * SyncConfig.DAMAGE_BASE_MULTIPLIER.get()))
                     .append(Component.translatable("tooltip.tacz.gun.explosion"));
         }
-        gunInfo.add(labeled("tooltip.tacz.gun.damage", damageValue));
+        infoStats.add(labeled("tooltip.tacz.gun.damage", damageValue));
 
         // 这两行的文案把数值包在 key 里（"25% 原版护甲穿透"），拆不出标签/数值两段，
         // 整行统一用灰；只有移动速度是负面数值，整行用红
         double armor = Mth.clamp(AttachmentDataUtils.getArmorIgnoreWithAttachment(gun, gunData), 0.0, 1.0);
-        gunInfo.add(Component.translatable("tooltip.tacz.gun.armor_ignore", PERCENT_FORMAT.format(armor))
+        infoStats.add(Component.translatable("tooltip.tacz.gun.armor_ignore", PERCENT_FORMAT.format(armor))
                 .withStyle(ChatFormatting.GRAY));
-        gunInfo.add(Component.translatable("tooltip.tacz.gun.head_shot_multiplier",
+        infoStats.add(Component.translatable("tooltip.tacz.gun.head_shot_multiplier",
                         PERCENT_FORMAT.format(AttachmentDataUtils.getHeadshotMultiplier(gun, gunData)))
                 .withStyle(ChatFormatting.GRAY));
-        gunInfo.add(Component.translatable("tooltip.tacz.gun.movement_speed", PERCENT_1_FORMAT.format(
+        infoStats.add(Component.translatable("tooltip.tacz.gun.movement_speed", PERCENT_1_FORMAT.format(
                         -SyncConfig.WEIGHT_SPEED_MULTIPLIER.get()
                                 * AttachmentDataUtils.getWightWithAttachment(gun, gunData)))
                 .withStyle(ChatFormatting.RED));
-        return gunInfo;
+        // 第三列：留给以后加的补充数据（开火模式、弹匣容量、内置配件……），当前没有就不画
     }
 
     /** 标签灰 + 数值白。TACZ 的标签 key 自带冒号，值直接接在后面。 */
@@ -1421,30 +1447,60 @@ public class ZtRefitScreen extends GunRefitScreen {
         return Component.translatable(labelKey).withStyle(ChatFormatting.GRAY).append(value);
     }
 
-    /** 按"先填满左列、再填下一列"铺进详情条，放不下的行丢掉。 */
-    private void drawGunInfo(GuiGraphics graphics, int x, int y, int width) {
-        int columnWidth = (width - 12) / INFO_COLUMNS;
-        int[] used = new int[INFO_COLUMNS];
-        for (Component line : gunInfoLines()) {
-            int col = -1;
-            for (int c = 0; c < INFO_COLUMNS; c++) {
-                if (used[c] < INFO_ROWS) {
-                    col = c;
-                    break;
-                }
-            }
-            if (col < 0) {
+    /**
+     * 三列铺进详情条，各列独立滚动，文字按 {@link #INFO_SCALE} 缩放。
+     *
+     * <p>缩放靠 {@code pose.scale}，所以坐标全在"局部空间"里：列宽要先除以缩放系数
+     * 换算成局部宽度再交给 {@code font.split}，否则折行位置会算错。</p>
+     */
+    private void drawGunInfo(GuiGraphics graphics, int x, int y, int width, int mouseX, int mouseY) {
+        buildGunInfo();
+        float shareTotal = 0f;
+        for (float share : INFO_COLUMN_SHARE) {
+            shareTotal += share;
+        }
+        int usable = width - 12;
+        float screenUnit = usable / shareTotal;
+        float localUnit = screenUnit / INFO_SCALE;
+
+        // 指针在哪一列：滚轮据此决定滚哪一列（屏幕坐标，不受缩放影响）
+        infoHoverColumn = -1;
+        float screenLeft = x + 6;
+        for (int c = 0; c < INFO_COLUMNS; c++) {
+            if (mouseX >= screenLeft && mouseX < screenLeft + INFO_COLUMN_SHARE[c] * screenUnit) {
+                infoHoverColumn = c;
                 break;
             }
-            int colX = x + 6 + col * columnWidth;
-            for (FormattedCharSequence seq : this.font.split(line, columnWidth - 4)) {
-                if (used[col] >= INFO_ROWS) {
-                    break;
-                }
-                graphics.drawString(this.font, seq, colX, y + 4 + used[col] * INFO_LINE_H, 0xFFFFFF, false);
-                used[col]++;
-            }
+            screenLeft += INFO_COLUMN_SHARE[c] * screenUnit;
         }
+
+        List<List<Component>> columns = List.of(infoMain, infoStats, infoExtra);
+        infoColumnLines = new int[INFO_COLUMNS];
+        PoseStack pose = graphics.pose();
+        pose.pushPose();
+        pose.translate(x + 6, y + 4, 0);
+        pose.scale(INFO_SCALE, INFO_SCALE, 1f);
+        float localLeft = 0f;
+        for (int c = 0; c < INFO_COLUMNS; c++) {
+            float localWidth = INFO_COLUMN_SHARE[c] * localUnit;
+            List<FormattedCharSequence> lines = new ArrayList<>();
+            for (Component line : columns.get(c)) {
+                lines.addAll(this.font.split(line, (int) (localWidth - 6)));
+            }
+            infoColumnLines[c] = lines.size();
+            infoScroll[c] = Mth.clamp(infoScroll[c], 0, Math.max(0, lines.size() - INFO_ROWS));
+            for (int i = infoScroll[c]; i < Math.min(lines.size(), infoScroll[c] + INFO_ROWS); i++) {
+                graphics.drawString(this.font, lines.get(i), (int) localLeft,
+                        (i - infoScroll[c]) * INFO_LINE_H, 0xFFFFFF, false);
+            }
+            localLeft += localWidth;
+        }
+        pose.popPose();
+    }
+
+    /** 详情条矩形：概览态下滚轮落在这里才滚信息卡。 */
+    private Rect detailRect() {
+        return new Rect(PAD, detailY(), this.width - PAD * 2, DETAIL_H);
     }
 
     private List<String> describe(ItemStack stack) {
