@@ -16,6 +16,8 @@
   "gui.z_tweaks.refit.candidates.empty": "no attachments for this slot",
   "gui.z_tweaks.refit.candidates.no_match": "no matching attachment",
   "gui.z_tweaks.refit.search.hint": "Search…",
+  "gui.z_tweaks.refit.gun.rpm": "RPM %s",
+  "gui.z_tweaks.refit.gun.mag": "Mag %s",
   "gui.z_tweaks.refit.candidate": "candidate: %s",
   "gui.z_tweaks.refit.slot.scope": "Scope",
   "gui.z_tweaks.refit.slot.muzzle": "Muzzle",

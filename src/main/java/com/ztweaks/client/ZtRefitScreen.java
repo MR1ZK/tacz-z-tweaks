@@ -5,6 +5,7 @@ import com.tacz.guns.api.entity.IGunOperator;
 import com.tacz.guns.api.item.IAttachment;
 import com.tacz.guns.api.item.IGun;
 import com.tacz.guns.api.item.attachment.AttachmentType;
+import com.tacz.guns.api.item.builder.AmmoItemBuilder;
 import com.tacz.guns.api.item.builder.AttachmentItemBuilder;
 import com.tacz.guns.api.modifier.IAttachmentModifier;
 import com.tacz.guns.client.animation.screen.RefitTransform;
@@ -517,7 +518,6 @@ public class ZtRefitScreen extends GunRefitScreen {
             drawCandidateList(graphics, mouseX, mouseY, partialTick);
         } else {
             hoveredRow = -1;
-            drawGunCard(graphics);
         }
         syncPreview();
         drawDetail(graphics, mouseX, mouseY);
@@ -788,6 +788,15 @@ public class ZtRefitScreen extends GunRefitScreen {
                             x + 6, line, 0xFF4FC3C3, false);
                     line += 10;
                 }
+            }
+        } else if (RefitTransform.getCurrentTransformType() == AttachmentType.NONE) {
+            // 概览态没有候选配件可看，详情条左侧改显示枪械本身的描述
+            graphics.drawString(this.font, truncate(gunStack().getHoverName().getString(), textW),
+                    x + 6, y + 8, ACCENT, false);
+            int gunLine = y + 24;
+            for (String desc : describeGun()) {
+                graphics.drawString(this.font, truncate(desc, textW), x + 6, gunLine, TEXT_DIM, false);
+                gunLine += 10;
             }
         }
 
@@ -1269,22 +1278,60 @@ public class ZtRefitScreen extends GunRefitScreen {
     }
 
     /**
-     * 概览态的枪械信息卡：直接整块渲染 TACZ 自己的枪械 tooltip —— 名字、描述、口径、
-     * 枪种、伤害、护甲穿透、爆头伤害、移动速度、枪械包名，跟物品栏里看到的完全一致。
+     * 概览态的枪械描述：与配件的 {@link #describe} 对称 —— 先取枪包作者写的文案，
+     * 没有就用数据拼一行摘要；没有文案时绝不造假文案。
      *
-     * <p>为什么不自己拼：这些参数行不走 {@code appendHoverText}，而是挂在
-     * {@code getTooltipImage()} 返回的自定义组件（TACZ 的 {@code ClientGunTooltip}）里，
-     * 外部拿不到里面的文本；自己照公式重算一遍，TACZ 一改就得跟着漂。
-     * 整块渲染还顺带把弹药图标带上了。唯一失去的控制权是那条
-     * "按 Z 打开改装界面"的提示 —— 人已经在改装界面里了，重复一句就重复一句吧。</p>
+     * <p>{@code GunIndexPOJO.getTooltip()} 是官方唯一在用的描述字段（物品 tooltip 里
+     * 最多显示 3 行），但很多枪包不写，会是 null。兜底摘要取类型 / 口径 / 射速 /
+     * 弹匣容量，全部是 {@link GunData} 上现成的。</p>
      */
-    private void drawGunCard(GuiGraphics graphics) {
+    private List<String> describeGun() {
+        List<String> lines = new ArrayList<>();
         ItemStack gun = gunStack();
-        if (IGun.getIGunOrNull(gun) == null) {
-            return;
+        IGun iGun = IGun.getIGunOrNull(gun);
+        if (iGun == null) {
+            return lines;
         }
-        Rect list = listRect();
-        graphics.renderTooltip(this.font, gun, list.x() + 2, list.y() + 2);
+        CommonGunIndex index = TimelessAPI.getCommonGunIndex(iGun.getGunId(gun)).orElse(null);
+        if (index == null) {
+            return lines;
+        }
+        String tooltip = index.getPojo().getTooltip();
+        if (tooltip != null) {
+            for (String part : I18n.get(tooltip).split("\n")) {
+                if (!part.isBlank() && lines.size() < 3) {
+                    lines.add(part);
+                }
+            }
+            if (!lines.isEmpty()) {
+                return lines;
+            }
+        }
+        GunData gunData = index.getGunData();
+        StringBuilder summary = new StringBuilder();
+        String typeKey = "tacz.type." + index.getType() + ".name";
+        String type = I18n.get(typeKey);
+        if (!type.equals(typeKey)) {
+            summary.append(type);
+        }
+        ItemStack ammo = AmmoItemBuilder.create().setId(gunData.getAmmoId()).build();
+        String ammoName = ammo.getHoverName().getString();
+        if (!ammoName.isBlank()) {
+            appendSegment(summary, ammoName);
+        }
+        appendSegment(summary, I18n.get("gui.z_tweaks.refit.gun.rpm", gunData.getRoundsPerMinute()));
+        appendSegment(summary, I18n.get("gui.z_tweaks.refit.gun.mag", gunData.getAmmoAmount()));
+        if (summary.length() > 0) {
+            lines.add(summary.toString());
+        }
+        return lines;
+    }
+
+    private static void appendSegment(StringBuilder builder, String segment) {
+        if (builder.length() > 0) {
+            builder.append("  ·  ");
+        }
+        builder.append(segment);
     }
 
     private List<String> describe(ItemStack stack) {
