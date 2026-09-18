@@ -28,8 +28,8 @@ side = "BOTH"
 [[dependencies.z_tweaks]]
 modId = "tacz"
 mandatory = true
-# 不限制版本：开发基于 1.1.8-hotfix，但 API 调用集中在公开包，硬卡下限只会挡住能跑的整合包。
-# 空字符串 = 任意版本（Forge MavenVersionAdapter 对空 range 的约定）。
-versionRange = ""
+# 下限 1.1.4：空 range 实测会导致加载崩溃；1.1.4 之前的 TACZ 内部结构差异太大，
+# 注入的 mixin 目标（renderFirstPerson / applyFirstPersonPositioningTransform）对不上。
+versionRange = "[1.1.4,)"
 ordering = "AFTER"
 side = "BOTH"
