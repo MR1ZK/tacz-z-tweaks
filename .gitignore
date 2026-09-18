@@ -1,0 +1,26 @@
+# Gradle
+.gradle/
+build/
+out/
+
+# Forge 开发运行目录
+run/
+
+# IDE
+.idea/
+*.iml
+*.ipr
+*.iws
+.vscode/
+.classpath
+.project
+.settings/
+bin/
+
+# 本地依赖 jar（TACZ 本体不入库）
+libs/*.jar
+
+# 系统
+*.log
+.DS_Store
+Thumbs.db

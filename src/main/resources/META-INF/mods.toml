@@ -1,0 +1,33 @@
+modLoader = "javafml"
+loaderVersion = "[46,)"
+license = "GPL-3.0"
+
+[[mods]]
+modId = "z_tweaks"
+version = "${file.jarVersion}"
+displayName = "TACZ: Z-Tweaks"
+authors = "Z-Tweaks contributors"
+description = '''
+TACZ 附属：接管改装界面，以 GUI 形式提供更好的武器预览、更简单的改装流程与更易阅读的配件简介和参数。
+'''
+
+[[dependencies.z_tweaks]]
+modId = "forge"
+mandatory = true
+versionRange = "[46,)"
+ordering = "NONE"
+side = "BOTH"
+
+[[dependencies.z_tweaks]]
+modId = "minecraft"
+mandatory = true
+versionRange = "[1.20,1.20.2)"
+ordering = "NONE"
+side = "BOTH"
+
+[[dependencies.z_tweaks]]
+modId = "tacz"
+mandatory = true
+versionRange = "[1.1.8,)"
+ordering = "AFTER"
+side = "BOTH"

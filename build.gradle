@@ -1,0 +1,126 @@
+buildscript {
+    repositories {
+        maven { url = "https://plugins.gradle.org/m2/" }
+        maven { url = 'https://maven.minecraftforge.net' }
+        maven { url = 'https://repo.spongepowered.org/repository/maven-public/' }
+        maven {
+            // 阿里云镜像，方便国内开发
+            url = uri("https://maven.aliyun.com/repository/public/")
+        }
+        mavenCentral()
+        gradlePluginPortal()
+    }
+    dependencies {
+        classpath group: 'net.minecraftforge.gradle', name: 'ForgeGradle', version: '6.0.+', changing: true
+        classpath group: 'org.spongepowered', name: 'mixingradle', version: '0.7-SNAPSHOT'
+    }
+}
+
+apply plugin: 'net.minecraftforge.gradle'
+apply plugin: 'org.spongepowered.mixin'
+apply plugin: 'eclipse'
+apply plugin: 'java'
+
+version = "${mod_version}"
+group = "${mod_group}"
+archivesBaseName = "${mod_id}-${minecraft_version}"
+
+java.toolchain.languageVersion = JavaLanguageVersion.of(17)
+
+mixin {
+    add sourceSets.main, "${mod_id}.refmap.json"
+    config "${mod_id}.mixins.json"
+}
+
+minecraft {
+    mappings channel: 'official', version: "${minecraft_version}"
+    copyIdeResources = true
+
+    runs {
+        client {
+            workingDirectory project.file('run/client')
+            property 'forge.logging.markers', 'REGISTRIES'
+            property 'forge.logging.console.level', 'debug'
+            property 'mixin.env.remapRefMap', 'true'
+            property 'mixin.env.refMapRemappingFile', "${projectDir}/build/createSrgToMcp/output.srg"
+
+            mods {
+                gunbench {
+                    source sourceSets.main
+                }
+            }
+        }
+
+        server {
+            workingDirectory project.file('run/server')
+            property 'forge.logging.markers', 'REGISTRIES'
+            property 'forge.logging.console.level', 'debug'
+            property 'mixin.env.remapRefMap', 'true'
+            property 'mixin.env.refMapRemappingFile', "${projectDir}/build/createSrgToMcp/output.srg"
+
+            mods {
+                gunbench {
+                    source sourceSets.main
+                }
+            }
+        }
+    }
+}
+
+sourceSets.main.resources { srcDir 'src/generated/resources' }
+
+repositories {
+    maven {
+        // 阿里云镜像，方便国内开发
+        url = uri("https://maven.aliyun.com/repository/public/")
+    }
+    maven {
+        // CurseForge 制品（TACZ 的分发渠道）
+        url "https://cursemaven.com"
+        content {
+            includeGroup "curse.maven"
+        }
+    }
+    mavenCentral()
+    flatDir {
+        dir 'libs'
+    }
+}
+
+dependencies {
+    minecraft "net.minecraftforge:forge:${forge_version}"
+
+    // ---- TACZ 本体 ----
+    // 方式一（默认）：把 TACZ 的发布 jar 放到 libs/ 下，文件名形如
+    //   tacz-1.20.1-1.1.8-hotfix.jar
+    // 来源：① 在 ../TACZ 仓库执行 `gradlew build` 取 build/libs 下的产物；
+    //       ② 或从 CurseForge / Modrinth 下载对应版本。
+    compileOnly fg.deobf(files("libs/tacz-${minecraft_version}-${tacz_version}.jar"))
+    // 开发环境需要 TACZ 在运行时存在，否则客户端无法启动：
+    runtimeOnly fg.deobf(files("libs/tacz-${minecraft_version}-${tacz_version}.jar"))
+
+    // 方式二（备选）：走 CurseMaven，需填入对应文件的 fileId
+    // compileOnly fg.deobf("curse.maven:tacz-706784:<fileId>")
+    // runtimeOnly  fg.deobf("curse.maven:tacz-706784:<fileId>")
+
+    // Mixin 注解处理器
+    annotationProcessor 'org.spongepowered:mixin:0.8.5:processor'
+}
+
+jar {
+    manifest {
+        attributes([
+                "Specification-Title"     : "${mod_id}",
+                "Specification-Vendor"    : "${mod_group}",
+                "Specification-Version"   : "1",
+                "Implementation-Title"    : project.name,
+                "Implementation-Version"  : project.version,
+                "Implementation-Vendor"   : "${mod_group}",
+                "MixinConfigs"            : "${mod_id}.mixins.json"
+        ])
+    }
+}
+
+tasks.withType(JavaCompile).configureEach {
+    options.encoding = 'UTF-8'
+}
