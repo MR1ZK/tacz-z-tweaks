@@ -729,9 +729,12 @@ public class ZtRefitScreen extends GunRefitScreen {
             }
 
             if (hovered) {
-                tooltip(Component.literal(allowed ? slotName(type)
-                        : I18n.get("gui.z_tweaks.refit.msg.slot_not_allowed", slotName(type))),
-                        (int) mouseX, (int) mouseY);
+                // 槽位条现在有两种按法：装着配件的槽位把"右键=卸下"直接写进提示，省得玩家去猜
+                String hint = !allowed
+                        ? I18n.get("gui.z_tweaks.refit.msg.slot_not_allowed", slotName(type))
+                        : (installed.isEmpty() ? slotName(type)
+                        : slotName(type) + "\n" + I18n.get("gui.z_tweaks.refit.tip.right_click_unload"));
+                tooltip(Component.literal(hint), (int) mouseX, (int) mouseY);
             }
         }
     }
@@ -1051,11 +1054,16 @@ public class ZtRefitScreen extends GunRefitScreen {
             OrbitCamera.reset();
             return true;
         }
-        // 槽位条（几何与绘制同源：slotRect）
+        // 槽位条（几何与绘制同源：slotRect）：左键=选中该槽位，右键=直接卸下该槽位上的配件。
+        // 右键在这里就早退，才不会落到底部"空白处=平移"那一支去拖相机。
         List<AttachmentType> types = slotTypes();
         for (int i = 0; i < types.size(); i++) {
             if (slotRect(types, i).contains(mouseX, mouseY)) {
-                selectSlot(types.get(i));
+                if (button == 1) {
+                    unloadSlot(types.get(i));
+                } else {
+                    selectSlot(types.get(i));
+                }
                 return true;
             }
         }
@@ -1259,12 +1267,20 @@ public class ZtRefitScreen extends GunRefitScreen {
         notify(I18n.get("gui.z_tweaks.refit.msg.not_owned"));
     }
 
+    /** 卸下当前选中槽位的配件（详情条的"卸下"按钮与 U 键）。 */
     private void unloadCurrent() {
+        unloadSlot(RefitTransform.getCurrentTransformType());
+    }
+
+    /**
+     * 卸下指定槽位上的配件。按钮 / U 键 / 右键点底栏槽位三条路径共用同一份护栏，
+     * 免得到处各写一套判断后，"点了没反应"的原因在不同入口下说法不一。
+     */
+    private void unloadSlot(AttachmentType type) {
         LocalPlayer player = getMinecraft().player;
         if (player == null) {
             return;
         }
-        AttachmentType type = RefitTransform.getCurrentTransformType();
         if (type == AttachmentType.NONE) {
             notify(I18n.get("gui.z_tweaks.refit.msg.overview"));
             return;
@@ -1275,9 +1291,15 @@ public class ZtRefitScreen extends GunRefitScreen {
             notify(I18n.get("gui.z_tweaks.refit.msg.overview"));
             return;
         }
+        // 右键能点到不支持的槽位（左键那条路已经在 selectSlot 里拦下了），这里补一道
+        if (!iGun.allowAttachmentType(gun, type)) {
+            notify(I18n.get("gui.z_tweaks.refit.msg.slot_not_allowed", slotName(type)));
+            return;
+        }
         ItemStack installed = iGun.getAttachment(gun, type);
         if (installed.isEmpty()) {
-            notify(I18n.get("gui.z_tweaks.refit.msg.overview"));
+            // 空槽位与"概览态"要分开报：右键点空槽还说"概览态"会让人以为点错了地方
+            notify(I18n.get("gui.z_tweaks.refit.msg.nothing_to_unload"));
             return;
         }
         // 与原生同款护栏：背包没空位就别发包。服务端那边是 inventory.add(配件) 返回 false
