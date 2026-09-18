@@ -6,6 +6,7 @@ import com.tacz.guns.api.item.attachment.AttachmentType;
 import net.minecraft.client.Minecraft;
 import net.minecraft.client.player.LocalPlayer;
 import net.minecraft.nbt.CompoundTag;
+import com.ztweaks.config.ZtConfig;
 import net.minecraft.resources.ResourceLocation;
 import net.minecraft.world.item.ItemStack;
 
@@ -90,6 +91,10 @@ public final class VirtualAssembly {
      * 虚拟装配不生效时原样返回 {@code incoming}，行为与原生完全一致。
      */
     public static ItemStack previewStack(ItemStack incoming) {
+        // 硬关：配置关掉后一律画真枪，不预览（与 OrbitCamera 的 orbit_camera 同一个语义）
+        if (!ZtConfig.VIRTUAL_ASSEMBLY.get()) {
+            return incoming;
+        }
         Minecraft minecraft = Minecraft.getInstance();
         // 护栏一：只在自家界面里生效 —— 离开界面立刻回到真枪，绝不漏到世界里
         if (!(minecraft.screen instanceof ZtRefitScreen)) {

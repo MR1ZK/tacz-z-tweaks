@@ -417,7 +417,12 @@ public class ZtRefitScreen extends GunRefitScreen {
         // 枪本体是 3D 世界里的渲染，压一层极淡的上下暗角把界面压出层次，同时不遮挡枪
         drawVignette(graphics);
         drawSlotBar(graphics, mouseX, mouseY);
-        drawCandidateList(graphics, mouseX, mouseY);
+        // 概览态不画候选框：空面板 + "0" 徽标是纯噪音。隐藏后那块区域交还给 3D 预览的拖拽/滚轮。
+        if (candidateListVisible()) {
+            drawCandidateList(graphics, mouseX, mouseY);
+        } else {
+            hoveredRow = -1;
+        }
         syncPreview();
         drawDetail(graphics, mouseX, mouseY);
         if (showNativeBars && ZtConfig.DEBUG_NATIVE_BARS.get()) {
@@ -527,6 +532,14 @@ public class ZtRefitScreen extends GunRefitScreen {
                         (int) mouseX, (int) mouseY);
             }
         }
+    }
+
+    /**
+     * 候选框是否可见：概览态（{@link AttachmentType#NONE}）没有"当前槽位"，候选列表必然为空，
+     * 此时整块不画。绘制、点击命中、滚轮判定共用这一个判定，隐藏后该区域归 3D 预览。
+     */
+    private boolean candidateListVisible() {
+        return RefitTransform.getCurrentTransformType() != AttachmentType.NONE;
     }
 
     /** 候选面板矩形：绘制、点击命中、滚轮判定三者共用同一来源。 */
@@ -677,17 +690,16 @@ public class ZtRefitScreen extends GunRefitScreen {
             }
         }
 
-        // Pros/Cons 两栏：标题带计数 + 同色下划线，条目用色标引导
+        // Pros/Cons 两栏：不写"优点 N / 缺点 N"标题，靠栏色（绿/红）与条目前缀区分；
+        // 省下的标题行高度直接换成多显示一条条目。
         int columnX = x + leftWidth + 6;
         int columnWidth = (width - leftWidth - 20) / 2;
         int rightColumnX = columnX + columnWidth + 8;
-        int entryTop = y + 19;
+        int entryTop = y + 5;
         // 条目数按按钮位置反推，避免最后一行压到按钮上（按钮挪了这里自动跟着变）
         int entryLimit = Math.max(1, (installRect().y() - 2 - entryTop) / 10);
-        drawPropertyColumn(graphics, columnX, y + 5, columnWidth, entryTop, entryLimit, pros,
-                I18n.get("gui.z_tweaks.refit.pros", pros.size()), GOOD);
-        drawPropertyColumn(graphics, rightColumnX, y + 5, columnWidth, entryTop, entryLimit, cons,
-                I18n.get("gui.z_tweaks.refit.cons", cons.size()), BAD);
+        drawPropertyColumn(graphics, columnX, columnWidth, entryTop, entryLimit, pros, GOOD);
+        drawPropertyColumn(graphics, rightColumnX, columnWidth, entryTop, entryLimit, cons, BAD);
 
         Rect installRect = installRect();
         Rect unloadRect = unloadRect();
@@ -699,7 +711,7 @@ public class ZtRefitScreen extends GunRefitScreen {
                 unloadRect.contains(mouseX, mouseY) && !dragging, false, unloadEnabled);
         // 不可用时把原因说清楚：悬停给提示，而不是点了没反应
         if (!dragging && installRect.contains(mouseX, mouseY) && !installEnabled) {
-            tooltip(Component.literal(I18n.get("gui.z_tweaks.refit.msg.not_owned", nameOf(selectedStack()))),
+            tooltip(Component.literal(I18n.get("gui.z_tweaks.refit.msg.not_owned")),
                     (int) mouseX, (int) mouseY);
         }
         if (!dragging && unloadRect.contains(mouseX, mouseY) && !unloadEnabled) {
@@ -711,24 +723,14 @@ public class ZtRefitScreen extends GunRefitScreen {
         }
     }
 
-    /** 一栏属性：标题 + 同色下划线 + 逐条色标。{@code limit} 由调用方按可用高度算出。 */
-    private void drawPropertyColumn(GuiGraphics graphics, int x, int titleY, int width, int entryTop,
-                                    int limit, List<String> entries, String title, int color) {
-        graphics.drawString(this.font, title, x, titleY, color, false);
-        graphics.fill(x, titleY + 10, x + width, titleY + 11, (color & 0x00FFFFFF) | 0x50000000);
+    /** 一栏属性：只有条目 + 色标，无标题、无分隔线。{@code limit} 由调用方按可用高度算出。 */
+    private void drawPropertyColumn(GuiGraphics graphics, int x, int width, int entryTop,
+                                    int limit, List<String> entries, int color) {
         for (int i = 0; i < entries.size() && i < limit; i++) {
             int rowY = entryTop + i * 10;
             graphics.fill(x + 1, rowY + 3, x + 3, rowY + 5, color);
             graphics.drawString(this.font, truncate(entries.get(i), width - 9), x + 7, rowY, color, false);
         }
-    }
-
-    /** 当前选中的候选配件栈（越界时兜底到最后一个）。 */
-    private ItemStack selectedStack() {
-        if (candidates.isEmpty()) {
-            return ItemStack.EMPTY;
-        }
-        return candidates.get(Math.min(selected, candidates.size() - 1));
     }
 
     /** 选中候选是否在背包里。不在就发不出包（服务端只认自己那份背包），按钮据此禁用。 */
@@ -809,8 +811,11 @@ public class ZtRefitScreen extends GunRefitScreen {
                 I18n.get(OrbitCamera.enabled()
                         ? "gui.z_tweaks.refit.hud.camera.on"
                         : "gui.z_tweaks.refit.hud.camera.off"),
-                fmt(OrbitCamera.yaw()), fmt(OrbitCamera.pitch()), fmt(OrbitCamera.zoom()),
+                fmt(OrbitCamera.yaw()), fmt(OrbitCamera.roll()), fmt(OrbitCamera.zoom()),
                 fmt(OrbitCamera.offsetX()), fmt(OrbitCamera.offsetY())));
+        // 枢轴读数：pivot_source / pivot_offset_y 改完看不到实际值等于盲调
+        lines.add(I18n.get("gui.z_tweaks.refit.hud.pivot", ZtConfig.PIVOT_SOURCE.get(),
+                fmt(OrbitCamera.lastPivotX()), fmt(OrbitCamera.lastPivotY())));
         lines.add(I18n.get(hits > 0
                 ? "gui.z_tweaks.refit.hud.mixin.hit"
                 : "gui.z_tweaks.refit.hud.mixin.miss", hits));
@@ -832,6 +837,11 @@ public class ZtRefitScreen extends GunRefitScreen {
         if (super.mouseClicked(mouseX, mouseY, button)) {
             return true;
         }
+        // 中键：复位相机，与 R 键走同一条路径（MC 的 button 从 0 起算，故中键是 2）
+        if (button == 2) {
+            OrbitCamera.reset();
+            return true;
+        }
         // 槽位条（几何与绘制同源：slotRect）
         List<AttachmentType> types = slotTypes();
         for (int i = 0; i < types.size(); i++) {
@@ -840,14 +850,16 @@ public class ZtRefitScreen extends GunRefitScreen {
                 return true;
             }
         }
-        // 候选列表（几何与绘制同源：rowRect）
-        Rect list = listRect();
-        int rows = visibleRows();
-        for (int i = 0; i < rows && scroll + i < candidates.size(); i++) {
-            if (rowRect(list, i).contains(mouseX, mouseY)) {
-                selected = scroll + i;
-                samplesDirty = true;
-                return true;
+        // 候选列表（几何与绘制同源：rowRect）。概览态框不画，点击自然也不该命中
+        if (candidateListVisible()) {
+            Rect list = listRect();
+            int rows = visibleRows();
+            for (int i = 0; i < rows && scroll + i < candidates.size(); i++) {
+                if (rowRect(list, i).contains(mouseX, mouseY)) {
+                    selected = scroll + i;
+                    samplesDirty = true;
+                    return true;
+                }
             }
         }
         // 详情条按钮
@@ -876,13 +888,15 @@ public class ZtRefitScreen extends GunRefitScreen {
             double fx = dragX / (double) this.width;
             double fy = dragY / (double) this.height;
             if (dragButton == 1) {
-                // 右键：只平移，不旋转。第一参数=左右（1 屏宽 = 1 格，鼠标往右武器往右），
+                // 右键：只平移，不旋转。第一参数=左右（1 屏宽 = pan_speed 格，鼠标往右武器往右），
                 // 第二参数=上下（屏幕 Y 向下、视图空间 Y 向上，所以取负）
-                OrbitCamera.pan((float) fx, (float) -fy);
+                float pan = ZtConfig.PAN_SPEED.get().floatValue();
+                OrbitCamera.pan((float) fx * pan, (float) -fy * pan);
             } else {
-                // 左键：上下拖 = pitch，绕武器原点的 X 轴翻转；左右拖 = yaw，绕 Y 轴环绕
-                OrbitCamera.rotateX((float) (fy * 180.0));
-                OrbitCamera.rotateY((float) (fx * 360.0));
+                // 左键：上下拖 = roll，绕枪械自身长轴（模型 Z 轴）滚转；
+                // 左右拖 = yaw，绕竖直轴环绕。两个自由度已足以到达任意姿态，故不再设"点头"。
+                OrbitCamera.rotateRoll((float) (fy * ZtConfig.ROLL_SPEED.get()));
+                OrbitCamera.rotateY((float) (fx * ZtConfig.YAW_SPEED.get()));
             }
             return true;
         }
@@ -899,11 +913,11 @@ public class ZtRefitScreen extends GunRefitScreen {
     @Override
     public boolean mouseScrolled(double mouseX, double mouseY, double delta) {
         // 指针在候选面板内才翻列表，其余位置一律给相机缩放 —— 与视觉边界一致，不会误触
-        if (listRect().contains(mouseX, mouseY)) {
+        if (candidateListVisible() && listRect().contains(mouseX, mouseY)) {
             scroll -= (int) Math.signum(delta);
             return true;
         }
-        OrbitCamera.addZoom((float) delta * 0.15f);
+        OrbitCamera.addZoom((float) delta * ZtConfig.ZOOM_STEP.get().floatValue());
         return true;
     }
 
@@ -988,7 +1002,7 @@ public class ZtRefitScreen extends GunRefitScreen {
         // 早先的写法是直接改客户端这份 NBT 假装装上，结果服务端毫不知情 —— 界面显示装了、
         // 服务端还是空槽，两边分叉。真正的"悬停虚拟装配"要克隆枪栈再驱动渲染管线（计划 §3.2），
         // 那属 M2；这里如实报错。
-        notify(I18n.get("gui.z_tweaks.refit.msg.not_owned", name));
+        notify(I18n.get("gui.z_tweaks.refit.msg.not_owned"));
     }
 
     private void unloadCurrent() {

@@ -1,6 +1,7 @@
 package com.ztweaks.client;
 
 import com.mojang.blaze3d.vertex.PoseStack;
+import com.ztweaks.config.ZtConfig;
 import net.minecraft.client.Minecraft;
 import org.joml.Matrix4f;
 
@@ -14,11 +15,11 @@ public final class OrbitCamera {
 
     /** 默认值刻意取单位变换：这样"默认视角"= 原生取景，可直接当对照基线。 */
     public static final float DEFAULT_YAW = 0f;
-    public static final float DEFAULT_PITCH = 0f;
+    public static final float DEFAULT_ROLL = 0f;
     public static final float DEFAULT_ZOOM = 1f;
 
     private static float yaw = DEFAULT_YAW;
-    private static float pitch = DEFAULT_PITCH;
+    private static float roll = DEFAULT_ROLL;
     private static float zoom = DEFAULT_ZOOM;
 
     /** 平移（模型空间的横向/纵向偏移，单位=格）。右键拖拽改这两个值。 */
@@ -34,11 +35,22 @@ public final class OrbitCamera {
     /** mixin 命中计数：界面上显示它，用一张截图就能证明注入成功与否。 */
     private static int applyCount = 0;
 
+    /** 上一帧实际使用的枢轴（模型空间，格）。诊断 HUD 读数用，确认配置真的生效了。 */
+    private static float lastPivotX = 0f;
+    private static float lastPivotY = 0f;
+
     private OrbitCamera() {
     }
 
+    /**
+     * 三个条件缺一不可：配置没硬关、V 键没临时关、当前是自家界面。
+     *
+     * <p>{@link ZtConfig#ORBIT_CAMERA} 是<b>硬关</b>——关掉后连 V 键都开不回来，
+     * 与 V 键"临时对照一下"是两件事，混在一起会让 V 的行为不可预测。</p>
+     */
     public static boolean active() {
-        return enabled && Minecraft.getInstance().screen instanceof ZtRefitScreen;
+        return ZtConfig.ORBIT_CAMERA.get() && enabled
+                && Minecraft.getInstance().screen instanceof ZtRefitScreen;
     }
 
     public static boolean enabled() {
@@ -53,12 +65,22 @@ public final class OrbitCamera {
         return applyCount;
     }
 
+    /** 上一帧实际使用的枢轴 X（模型空间，格）。 */
+    public static float lastPivotX() {
+        return lastPivotX;
+    }
+
+    /** 上一帧实际使用的枢轴 Y（模型空间，格）。 */
+    public static float lastPivotY() {
+        return lastPivotY;
+    }
+
     public static float yaw() {
         return yaw;
     }
 
-    public static float pitch() {
-        return pitch;
+    public static float roll() {
+        return roll;
     }
 
     public static float zoom() {
@@ -73,12 +95,18 @@ public final class OrbitCamera {
         return offsetY;
     }
 
-    /** 绕武器原点的 X 轴旋转（左键上下拖）：观感是"翻转武器"。 */
-    public static void rotateX(float degrees) {
-        pitch = Math.max(-179f, Math.min(179f, pitch + degrees));
+    /**
+     * 绕武器自身长轴（模型空间 Z 轴）滚转（左键上下拖）。
+     *
+     * <p>取模而非 clamp：绕长轴是 SO(2) 自由度，clamp 到 ±179° 会砍掉一半可达姿态，
+     * 而且"转到头拖不动"看着像 bug。当前实现没有任何角度插值，两种写法代价相同；
+     * 将来若要加平滑，必须先做最短角差处理（{@code Mth.wrapDegrees(to - from)}）。</p>
+     */
+    public static void rotateRoll(float degrees) {
+        roll = (roll + degrees) % 360f;
     }
 
-    /** 绕武器原点的 Y 轴旋转（左键左右拖）。 */
+    /** 绕武器自身竖直轴（模型空间 Y 轴）环绕（左键左右拖）。 */
     public static void rotateY(float degrees) {
         yaw = (yaw + degrees) % 360f;
     }
@@ -104,20 +132,24 @@ public final class OrbitCamera {
 
     public static void reset() {
         yaw = DEFAULT_YAW;
-        pitch = DEFAULT_PITCH;
+        roll = DEFAULT_ROLL;
         zoom = DEFAULT_ZOOM;
         offsetX = 0f;
         offsetY = 0f;
     }
 
     /**
-     * 在 TACZ 应用完改装取景变换之后，追加"旋转 + 缩放"、前置"平移"。
+     * 在 TACZ 应用完改装取景变换之后，追加"环绕 + 滚转 + 缩放"、前置"平移"。
      *
-     * <p><b>旋转/缩放</b>：以 {@code mulPoseMatrix} 追加，展开后是
-     * {@code P·Ry·Rx·S}，作用在**模型空间**，枢轴取模型自身原点（枪就在原点附近），
-     * 观感就是"绕着武器转/翻转武器"。这里不能照抄 TACZ 的
-     * {@code T(0,1.5,0)·M·T(0,-1.5,0)} 共轭写法：1.5 格在模型空间里等于
-     * "模型上方 1.5 格"，大角度会把枪甩出画面。</p>
+     * <p><b>轴向</b>：注入点处模型空间三轴在屏幕上的指向是 X≈视线方向、Y≈屏幕竖直（+Y 向下）、
+     * Z≈屏幕水平（+Z 向右）。枪械的长轴（枪管）就是模型 Z 轴 —— 枪口在 −Z，屏幕上朝左。
+     * 所以左右拖绕 Y 轴（环绕）、上下拖绕 Z 轴（绕枪管滚转）。</p>
+     *
+     * <p><b>枢轴</b>：追加的矩阵作用在链尾局部坐标上，枢轴默认是模型空间原点 (0,0,0)，
+     * 而原点换算回基岩坐标是 (0,24,0) —— <b>悬在枪身上方约 1 格</b>，直接绕它转就成了
+     * "绕一个外部的点翻筋斗"。所以这里再套一层共轭 {@code T(p)·R·T(−p)}，把枢轴搬到
+     * 根骨骼所在的高度，也就是枪身长轴上。{@code pivotX/pivotY} 由调用方从
+     * {@code BedrockGunModel.getRootNode()} 取（单位为基岩像素，需 /16）。</p>
      *
      * <p><b>平移</b>：不能同样追加在模型空间里 —— 注入点之前 TACZ 已经叠了
      * {@code Rz(180°)}（基岩模型上下颠倒）和改装取景矩阵，
@@ -127,19 +159,28 @@ public final class OrbitCamera {
      * 把 {@code pose.m30/m31} 直接当作相对摄像机中心的横纵偏移）。
      * 这样平移也不受上面旋转的影响：转过枪之后再平移，依然是纯屏幕上的挪动。</p>
      */
-    public static void applyTo(PoseStack poseStack) {
+    public static void applyTo(PoseStack poseStack, float pivotX, float pivotY) {
         if (!active()) {
             return;
         }
         applyCount++;
+        lastPivotX = pivotX;
+        lastPivotY = pivotY;
         float scale = 1f / Math.max(zoom, 0.05f);
-        // ① 绕武器原点的环绕（Y 轴）与翻转（X 轴），外加缩放 —— 模型空间
-        poseStack.mulPoseMatrix(new Matrix4f()
+        // ① 环绕（Y 轴）+ 绕长轴滚转（Z 轴）+ 缩放，全部绕枪身长轴 —— 模型空间
+        Matrix4f cam = new Matrix4f()
                 .identity()
                 .rotateY((float) Math.toRadians(yaw))
-                .rotateX((float) Math.toRadians(pitch))
-                .scale(scale, scale, scale));
-        // ② 平移 —— 前置到当前 pose，等价于在屏幕上整体挪动武器
+                .rotateZ((float) Math.toRadians(roll))
+                .scale(scale, scale, scale);
+        // ② 把枢轴从模型原点搬到枪身长轴上：T(p)·cam·T(−p)
+        if (pivotX != 0f || pivotY != 0f) {
+            cam = new Matrix4f().identity().translate(pivotX, pivotY, 0f)
+                    .mul(cam)
+                    .translate(-pivotX, -pivotY, 0f);
+        }
+        poseStack.mulPoseMatrix(cam);
+        // ③ 平移 —— 前置到当前 pose，等价于在屏幕上整体挪动武器
         if (offsetX != 0f || offsetY != 0f) {
             Matrix4f pose = poseStack.last().pose();
             pose.set(new Matrix4f().identity().translate(offsetX, offsetY, 0f).mul(pose));

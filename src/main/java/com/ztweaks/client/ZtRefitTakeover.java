@@ -3,6 +3,7 @@ package com.ztweaks.client;
 import com.mojang.logging.LogUtils;
 import com.tacz.guns.client.gui.GunRefitScreen;
 import com.ztweaks.ZTweaksMod;
+import com.ztweaks.config.ZtConfig;
 import net.minecraft.client.gui.screens.Screen;
 import net.minecraftforge.api.distmarker.Dist;
 import net.minecraftforge.client.event.ScreenEvent;
@@ -29,6 +30,12 @@ public final class ZtRefitTakeover {
         Screen screen = event.getNewScreen();
         // 只接管"原生"及其它模组的改装界面；自己的子类不再二次接管，避免递归。
         if (screen instanceof GunRefitScreen && !(screen instanceof ZtRefitScreen)) {
+            if (!ZtConfig.TAKEOVER.get()) {
+                // 必须留痕：静默不接管和"mixin 没注入"表现一模一样，排查时会白白浪费一轮
+                LOGGER.info("[Z-Tweaks] takeover disabled by config (refit.takeover=false): using native {}",
+                        screen.getClass().getName());
+                return;
+            }
             LOGGER.info("[Z-Tweaks] takeover: {} -> ZtRefitScreen", screen.getClass().getName());
             event.setNewScreen(new ZtRefitScreen());
         }
