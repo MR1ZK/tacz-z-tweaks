@@ -36,7 +36,7 @@
 
 ## 配置
 
-`config/z_tweaks-client.toml`：
+`config/z_tweaks-client.toml`，也可以从游戏内的「选项 → Mod → TACZ: Z-Tweaks → Config」打开。界面里改完即时生效（所有读取点都是运行时 `.get()`），关闭界面时写盘。
 
 | 段 | 项 | 默认 | 说明 |
 |---|---|---|---|
