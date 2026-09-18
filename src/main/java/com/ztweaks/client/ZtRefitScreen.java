@@ -36,11 +36,14 @@ import net.minecraft.world.entity.player.Inventory;
 import net.minecraft.world.item.ItemStack;
 import org.lwjgl.glfw.GLFW;
 
+import javax.annotation.Nullable;
 import java.util.ArrayList;
 import java.util.Comparator;
 import java.util.List;
 import java.util.Locale;
 import java.util.Map;
+import java.util.regex.Matcher;
+import java.util.regex.Pattern;
 
 /**
  * 原型（throwaway）：接管后的改装界面。
@@ -316,8 +319,9 @@ public class ZtRefitScreen extends GunRefitScreen {
      * 逐属性比较 {@code modifier()} 的差值；差值符号配合 {@code positivelyBetter}
      * 决定进 Pros 还是 Cons。</p>
      *
-     * <p>已知代价：文本里的**单位丢了**（单位只存在于 TACZ 预拼字符串中，见 ADR-0001），
-     * 这里只有从成品文本里剥出来的单位残留可作近似。</p>
+     * <p>增量文本<b>优先直接取 TACZ 自己算好的那段</b>（见 {@link #deltaTextOf}）：它已经按
+     * 各属性自己的规则换算过并带好单位，跟原生属性条完全对齐。解析不到时才退回自算 +
+     * {@link #unitOf} 的近似写法。</p>
      */
     private void computeProsConsDelta() {
         LocalPlayer player = getMinecraft().player;
@@ -353,19 +357,51 @@ public class ZtRefitScreen extends GunRefitScreen {
                 if (Math.abs(delta) < 1.0E-6) {
                     continue;
                 }
-                String text = I18n.get(now.titleKey()) + " "
-                        + (delta > 0 ? "+" : "")
-                        + String.format("%.2f", delta) + unitOf(now.positivelyString());
+                // 增量的符号决定取 positively 还是 negative 那一份成品文本
+                String deltaText = deltaTextOf(delta > 0 ? now.positivelyString() : now.negativeString());
+                String amount = deltaText != null ? deltaText
+                        : (delta > 0 ? "+" : "") + String.format("%.2f", delta) + unitOf(now.positivelyString());
+                String text = I18n.get(now.titleKey()) + " " + amount;
                 boolean better = (delta > 0) == now.positivelyBetter();
                 (better ? pros : cons).add(text);
             }
         });
     }
 
+    /** TACZ 成品串里"括号内的增量"，如 {@code 85.0% §a(+15.0%)} 中的 {@code +15.0%}。 */
+    private static final Pattern DELTA_TOKEN = Pattern.compile("\\(([+-]?[\\d.]+)([^)]*)\\)");
+
+    /**
+     * 从 TACZ 成品文本里抠出它自己算好的增量（含符号与单位）。
+     *
+     * <p>为什么不再自己算：TACZ 的 {@code positivelyString} 形如 {@code 85.0% §a(+15.0%)}，
+     * 括号里的 {@code +15.0%} 就是原生属性条显示的增量 —— 数字已按该属性自己的规则换算过
+     * （百分号类属性乘了 100），单位也是原生的。早先拿 {@code modifier()} 相减再自己剥单位，
+     * 结果数字差 100 倍，且百分号类属性会剥出两个 {@code %}，显示成 {@code +0.15%%}。</p>
+     *
+     * @return {@code "+15.0%"} 这样的增量文本；解析不出来返回 {@code null}，由调用方退回旧写法
+     */
+    @Nullable
+    private static String deltaTextOf(@Nullable String taczString) {
+        if (taczString == null) {
+            return null;
+        }
+        Matcher matcher = DELTA_TOKEN.matcher(taczString.replaceAll("§.", ""));
+        if (!matcher.find()) {
+            return null;
+        }
+        String token = matcher.group(1) + matcher.group(2);
+        return token.isBlank() ? null : token;
+    }
+
     /** 从 TACZ 成品文本里剥出单位残留：去掉色码、数字、正负号、括号与空白后剩下的字母。 */
     private static String unitOf(String sample) {
         String stripped = sample.replaceAll("§.", "").replaceAll("[0-9.+\\-()\\s]", "");
-        return stripped.length() <= 4 ? stripped : "";
+        if (stripped.isEmpty() || stripped.length() > 4) {
+            return "";
+        }
+        // 百分号类属性的成品串里有两个 %（值一个、增量一个），剥出来会重复
+        return stripped.chars().allMatch(c -> c == '%') ? "%" : stripped;
     }
 
     /**
