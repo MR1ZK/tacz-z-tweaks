@@ -852,22 +852,24 @@ public class ZtRefitScreen extends GunRefitScreen {
         Rect installRect = installRect();
         Rect unloadRect = unloadRect();
         boolean installEnabled = selectedOwned();
-        boolean unloadEnabled = canUnload();
-        button(graphics, installRect, I18n.get("gui.z_tweaks.refit.install"),
-                installRect.contains(mouseX, mouseY) && !dragging, true, installEnabled);
-        button(graphics, unloadRect, I18n.get("gui.z_tweaks.refit.unload"),
-                unloadRect.contains(mouseX, mouseY) && !dragging, false, unloadEnabled);
-        // 不可用时把原因说清楚：悬停给提示，而不是点了没反应
-        if (!dragging && installRect.contains(mouseX, mouseY) && !installEnabled) {
-            tooltip(Component.literal(I18n.get("gui.z_tweaks.refit.msg.not_owned")),
-                    (int) mouseX, (int) mouseY);
-        }
-        if (!dragging && unloadRect.contains(mouseX, mouseY) && !unloadEnabled) {
-            // 禁用原因分两种：概览态（没选槽位）与"选中的槽位是空的"，提示文案不能混用
-            tooltip(Component.literal(I18n.get(RefitTransform.getCurrentTransformType() == AttachmentType.NONE
-                            ? "gui.z_tweaks.refit.msg.overview"
-                            : "gui.z_tweaks.refit.msg.nothing_to_unload")),
-                    (int) mouseX, (int) mouseY);
+        // 概览态不画这两个按钮：没有选中槽位，它们永远处于禁用态，
+        // 只会占着参数卡右下的空间。安装/卸载的提示也只跟按钮走。
+        if (RefitTransform.getCurrentTransformType() != AttachmentType.NONE) {
+            boolean unloadEnabled = canUnload();
+            button(graphics, installRect, I18n.get("gui.z_tweaks.refit.install"),
+                    installRect.contains(mouseX, mouseY) && !dragging, true, installEnabled);
+            button(graphics, unloadRect, I18n.get("gui.z_tweaks.refit.unload"),
+                    unloadRect.contains(mouseX, mouseY) && !dragging, false, unloadEnabled);
+            // 不可用时把原因说清楚：悬停给提示，而不是点了没反应
+            if (!dragging && installRect.contains(mouseX, mouseY) && !installEnabled) {
+                tooltip(Component.literal(I18n.get("gui.z_tweaks.refit.msg.not_owned")),
+                        (int) mouseX, (int) mouseY);
+            }
+            if (!dragging && unloadRect.contains(mouseX, mouseY) && !unloadEnabled) {
+                // 禁用原因分两种："选中的槽位是空的"与槽位不支持，提示文案不能混用
+                tooltip(Component.literal(I18n.get("gui.z_tweaks.refit.msg.nothing_to_unload")),
+                        (int) mouseX, (int) mouseY);
+            }
         }
     }
 
