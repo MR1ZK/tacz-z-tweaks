@@ -1,22 +1,16 @@
 # TACZ: Z-Tweaks（TACZ：改装UI调整）
 
-面向 Minecraft Forge 1.20.1 的 [TACZ](https://github.com/MCModderAnchor/TACZ)（Timeless & Classics Guns）附属模组。它换掉 TACZ 自带的改装界面（默认 Z 键）：预览能拖着转、能滚轮缩放，鼠标划过配件就在 3D 里先装上看看效果；候选列表只列当前槽位装得上的东西，双击即装；参数也不用自己算，Pros / Cons 双栏直接说明装上去是变好还是变差。
+面向 Minecraft Forge 1.20.1 的 [TACZ](https://github.com/MCModderAnchor/TACZ)（Timeless & Classics Guns）附属模组，接管 TACZ 自带的改装界面（默认 Z 键）。
+
+预览可以拖着转、滚轮缩放，鼠标划过候选配件就在 3D 里先装上看看效果。候选列表只列当前槽位装得上的配件，双击即装。装上去是变好还是变差不用自己算，Pros / Cons 双栏直接写出来。
 
 界面布局参考了 Garry's Mod 的 ARC-9。术语表在 `CONTEXT.md`，架构决策记录在 `docs/adr/`。
 
-## 已实现
+## 安装
 
-| 能力 | 说明 |
-|---|---|
-| 界面接管 | 用 `ScreenEvent.Opening` 拦截所有打开原生 `GunRefitScreen` 的入口（按键、其它模组、服务端刷新一并接管），不需要 mixin |
-| 轨道相机 | 左键左右拖环绕、上下拖绕枪械自身长轴滚转，枢轴取根骨骼所以贴在枪身上；右键拖平移，滚轮缩放，可以转满圈 |
-| 悬停虚拟装配 | 鼠标划过候选列表，预览里就装上那个配件。克隆枪栈驱动渲染，不落 NBT 也不发 packet，先看效果再决定装不装 |
-| Pros / Cons | 由属性修改器自动推导增减，绿 / 红双栏直读。`DELTA` 模式算"装上后会变成什么样"，`TACZ_TEXT` 模式直接复用 TACZ 的成品文本 |
-| 候选列表 | 只列当前槽位装得上的配件。生存模式只看背包里有的，创造模式列全部并把没带在身上的图标盖灰（能预览、装不上，点安装会提示"缺少配件"）；**已拥有（真能装上）的配件永远置顶**，优先级高于玩家选的排序方式 |
-| 概览态 | 没选槽位时不画候选框，那块区域交还给 3D 预览的拖拽和缩放；详情条整条拿来放枪械参数，分三列：名字+描述、参数（口径/经验等级/枪种/伤害/护甲穿透/爆头伤害/移动速度）、预留。文字按 0.8 缩放，各列可独立用滚轮翻 |
-| 搜索、排序与双击 | 候选框底部一行：左侧搜索框（按显示名过滤，切槽位自动清空），右侧排序按钮（点击循环切换 名称/模组 × A-Z/Z-A，切槽位不清空）；双击候选行直接装上，省掉"点配件再点安装" |
+装好 Forge 1.20.1，把 TACZ 本体和本模组的 jar 一起丢进 `.minecraft/mods/`。
 
-全项目只有 2 处 mixin（轨道相机、虚拟装配），都是 `require = 0`：注入失败就静默降级成原生行为，界面其余部分照常工作。诊断 HUD 上的"轨道注入命中"计数能直接看出到底注入了没有。
+TACZ 需要 **1.1.4 及以上**，这是 `src/main/resources/META-INF/mods.toml` 声明的范围。实际只按 `1.1.8-hotfix` 编译和试玩过，更早的版本没冒烟：万一那边改了注入目标的方法签名，注入会静默降级，界面照常但相机和虚拟装配失效。
 
 ## 操作
 
@@ -40,22 +34,32 @@
 
 `config/z_tweaks-client.toml`，也可以从游戏内的「选项 → Mod → TACZ: Z-Tweaks → Config」打开。界面里改完即时生效（所有读取点都是运行时 `.get()`），关闭界面时写盘。
 
-| 段 | 项 | 默认 | 说明 |
-|---|---|---|---|
-| `refit` | `pros_cons_mode` | `DELTA` | Pros/Cons 生成方式：`DELTA` 自算增减 / `TACZ_TEXT` 复用 TACZ 成品文本 |
-| `refit` | `takeover` | `true` | 接管原生改装界面。关掉就回到 TACZ 原生界面，日志里会留一条说明是被配置关的 |
-| `refit` | `orbit_camera` | `true` | 轨道相机总开关，硬关：关掉后 `V` 键也开不回来 |
-| `refit` | `virtual_assembly` | `true` | 悬停虚拟装配总开关，硬关：关掉后预览始终是手上的真枪 |
-| `debug` | `hud` | `false` | 左上角诊断 HUD（mixin 命中数、相机读数、枢轴读数、取景进度、字体测试） |
-| `debug` | `samples` | `false` | 详情条里打印 TACZ 成品文本原文（含色码） |
-| `debug` | `native_bars_key` | `false` | 启用 `G` 键叠加原生属性条 |
-| `debug` | `camera_hotkey` | `false` | 启用 `V` 键开关轨道相机 |
-| `debug` | `pivot_source` | `ROOT_PIVOT` | 枢轴取法：`ROOT_PIVOT` 贴枪身长轴 / `ORIGIN` 是枢轴修复前的模型原点，用来做改前改后对照 |
-| `debug` | `pivot_offset_y` | `0.0` | 枢轴微调，在 `pivot_source` 之上再抬高或降低多少格（±1.0） |
-| `debug` | `roll_speed` | `360.0` | 上下拖一整屏高对应的滚转角度（度） |
-| `debug` | `yaw_speed` | `360.0` | 左右拖一整屏宽对应的环绕角度（度） |
-| `debug` | `pan_speed` | `1.0` | 右键拖一整屏对应的平移距离（格） |
-| `debug` | `zoom_step` | `0.15` | 滚轮每格对应的缩放增量 |
+| 项 | 默认 | 说明 |
+|---|---|---|
+| `pros_cons_mode` | `DELTA` | Pros/Cons 生成方式：`DELTA` 自算增减 / `TACZ_TEXT` 复用 TACZ 成品文本 |
+| `takeover` | `true` | 接管原生改装界面。关掉就回到 TACZ 原生界面，日志里会留一条说明是被配置关的 |
+| `orbit_camera` | `true` | 轨道相机总开关，硬关：关掉后 `V` 键也开不回来 |
+| `virtual_assembly` | `true` | 悬停虚拟装配总开关，硬关：关掉后预览始终是手上的真枪 |
+
+`debug` 段的 10 个诊断开关（HUD、枢轴取法、相机转速、滚轮步长等）见 `docs/debug-config.md`。
+
+## 已实现
+
+| 能力 | 说明 |
+|---|---|
+| 界面接管 | 按键、其它模组、服务端刷新打开原生界面的入口，全部转到 Z-Tweaks 界面 |
+| 轨道相机 | 左键左右拖环绕、上下拖绕枪械自身长轴滚转，枢轴取根骨骼所以贴在枪身上；右键拖平移，滚轮缩放，可以转满圈 |
+| 悬停虚拟装配 | 鼠标划过候选列表，预览里就装上那个配件。克隆枪栈驱动渲染，不落 NBT 也不发 packet，先看效果再决定装不装 |
+| Pros / Cons | 由属性修改器自动推导增减，绿 / 红双栏直读。`DELTA` 模式算"装上后会变成什么样"，`TACZ_TEXT` 模式直接复用 TACZ 的成品文本 |
+| 候选列表 | 只列当前槽位装得上的配件。生存模式只看背包里有的，创造模式列全部并把没带在身上的图标盖灰（能预览、装不上，点安装会提示"缺少配件"）；**已拥有（真能装上）的配件永远置顶**，优先级高于玩家选的排序方式 |
+| 概览态 | 没选槽位时不画候选框、不画搜索框和排序按钮，那块区域交还给预览的拖拽和缩放；详情条整条拿来放枪械参数，分三列：名字+描述、参数（口径/经验等级/枪种/伤害/护甲穿透/爆头伤害/移动速度）、预留 |
+| 搜索、排序与双击 | 候选框底部一行：左侧搜索框（按显示名过滤，切槽位自动清空），右侧排序按钮（点击循环切换 名称/模组 × A-Z/Z-A，切槽位不清空）；双击候选行直接装上 |
+
+## 实现要点
+
+纯客户端。安装、卸载、变焦、镭射配色都复用 TACZ 自己的 packet；接管原生界面靠 `ScreenEvent.Opening` 拦截，不需要 mixin。
+
+全项目只有 2 处 mixin（轨道相机、虚拟装配），都是 `require = 0`：注入失败就静默降级成原生行为，界面其余部分照常工作。诊断 HUD 上的"轨道注入命中"计数能直接看出到底注入了没有。更细的架构笔记在 `docs/session-context.md`。
 
 ## 状态
 
@@ -63,18 +67,14 @@
 
 ## 构建
 
-1. 取得 TACZ 本体 jar：
-   - 在相邻仓库构建：`cd ../TACZ && ./gradlew build`，取 `build/libs/` 产物；
-   - 或从 CurseForge / Modrinth 下载对应版本。
-2. 把 jar 放进 `libs/`，命名为 `tacz-1.20.1-1.1.8-hotfix.jar`（与 `gradle.properties` 里的 `tacz_version` 一致）。
+1. 取得 TACZ 本体 jar：在相邻仓库构建 `cd ../TACZ && ./gradlew build`，取 `build/libs/` 产物；或从 CurseForge / Modrinth 下载。
+2. 把 jar 放进 `libs/`，文件名照 `gradle.properties` 里的 `tacz_version` 来。
 3. 构建本模组：
 
 ```bash
-./gradlew build          # 产物在 build/libs/z_tweaks-1.20.1-0.1.1-hotfix1.jar
+./gradlew build          # 产物在 build/libs/
 ./gradlew runClient      # 启动开发客户端（需要 libs/ 中存在 TACZ jar）
 ```
-
-> 注：改动依赖版本后同步修改 `gradle.properties` 与 `libs/` 中的文件名。
 
 ## 许可
 
