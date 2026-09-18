@@ -79,11 +79,14 @@ public class ZtRefitScreen extends GunRefitScreen {
     private static final int DETAIL_H = 68;
     private static final int PAD = 6;
     /** 候选面板宽度与内部两栏高度：绘制与命中检测共用 {@link #listRect()}，不再各写一份。 */
-    private static final int LIST_W = 168;
+    private static final int LIST_W = 190;
     private static final int LIST_HEADER = 15;
-    /** 候选面板底部预留给搜索框的高度（原"滚轮=翻页"提示行只有 11px，放不下输入框）。 */
+    /** 候选面板底部预留给搜索框 + 排序按钮这一行的高度（原"滚轮=翻页"提示行只有 11px，放不下输入框）。 */
     private static final int LIST_FOOTER = 17;
     private static final int SEARCH_H = 12;
+    /** 搜索框右侧的排序按钮宽度，以及它与搜索框之间的缝。 */
+    private static final int SORT_W = 58;
+    private static final int SORT_GAP = 4;
     /** 双击阈值，与 MC 原生 AbstractContainerScreen 一致。 */
     private static final long DOUBLE_CLICK_MS = 250L;
     /**
@@ -162,6 +165,13 @@ public class ZtRefitScreen extends GunRefitScreen {
     private EditBox searchBox = null;
     /** 当前搜索词。切槽位时清空：换槽位就是换一批配件，旧关键词大概率不适用。 */
     private String searchQuery = "";
+
+    /**
+     * 候选列表排序偏好：按名称还是按模组、正序还是倒序。
+     * 切槽位<b>不</b>清空 —— 排序是玩家的全局习惯，不是某个槽位的属性（与搜索词相反）。
+     */
+    private SortField sortField = SortField.NAME;
+    private boolean sortAscending = true;
 
     /** 上一次点击候选条目的时间戳 / 下标 / 鼠标键，用于双击判定。 */
     private long lastRowClickTime = 0L;
@@ -247,10 +257,59 @@ public class ZtRefitScreen extends GunRefitScreen {
         addRenderableWidget(box);
     }
 
-    /** 搜索框矩形：贴候选面板底部内侧，几何与 {@link #listRect()} 同源。 */
+    /** 搜索框矩形：贴候选面板底部内侧，右边腾出 {@link #SORT_W} 给排序按钮，几何与 {@link #listRect()} 同源。 */
     private Rect searchRect() {
         Rect list = listRect();
-        return new Rect(list.x() + 4, list.y() + list.h() - SEARCH_H - 2, list.w() - 8, SEARCH_H);
+        int width = list.w() - 8 - SORT_W - SORT_GAP;
+        return new Rect(list.x() + 4, footerY(list), width, SEARCH_H);
+    }
+
+    /** 排序按钮矩形：与搜索框同一行，紧贴其右侧。 */
+    private Rect sortRect() {
+        Rect search = searchRect();
+        return new Rect(search.x() + search.w() + SORT_GAP, search.y(), SORT_W, SEARCH_H);
+    }
+
+    /** 候选面板底部这一行（搜索框 / 排序按钮）的顶边。 */
+    private static int footerY(Rect list) {
+        return list.y() + list.h() - SEARCH_H - 2;
+    }
+
+    /**
+     * 循环切换排序：名称 A-Z → 名称 Z-A → 模组 A-Z → 模组 Z-A → 名称 A-Z。
+     *
+     * <p>用一个按钮装下四种状态，比"字段 + 方向两个按钮"省一半宽度（候选面板只有
+     * {@link #LIST_W} 宽，还要和搜索框挤同一行）。当前状态直接写在按钮上，鼠标悬停有提示。</p>
+     *
+     * <p>改完把 {@code cachedType} 置空触发下一帧重建 —— 候选列表按槽位类型缓存，
+     * 不置空的话排序不会立即生效。</p>
+     */
+    private void cycleSort() {
+        if (sortField == SortField.NAME) {
+            if (sortAscending) {
+                sortAscending = false;
+            } else {
+                sortField = SortField.MOD;
+                sortAscending = true;
+            }
+        } else {
+            if (sortAscending) {
+                sortAscending = false;
+            } else {
+                sortField = SortField.NAME;
+                sortAscending = true;
+            }
+        }
+        cachedType = null;
+        selected = 0;
+        scroll = 0;
+        samplesDirty = true;
+    }
+
+    /** 排序按钮上的文字：字段 + 方向，取 lang（如"名称 A-Z" / "Mod Z-A"）。 */
+    private String sortLabel() {
+        return I18n.get("gui.z_tweaks.refit.sort." + sortField.name().toLowerCase(Locale.ROOT)
+                + (sortAscending ? ".asc" : ".desc"));
     }
 
     /**
@@ -349,12 +408,10 @@ public class ZtRefitScreen extends GunRefitScreen {
             return;
         }
         cachedType = type;
-        candidates.clear();
-        candidateInvSlots.clear();
         List<Map.Entry<ResourceLocation, CommonAttachmentIndex>> all =
                 new ArrayList<>(TimelessAPI.getAllCommonAttachmentIndex());
-        all.sort(Comparator.comparing(entry -> entry.getKey().toString()));
         Inventory inventory = player.getInventory();
+        List<Candidate> found = new ArrayList<>();
         for (Map.Entry<ResourceLocation, CommonAttachmentIndex> entry : all) {
             if (entry.getValue().getType() != type) {
                 continue;
@@ -372,12 +429,38 @@ public class ZtRefitScreen extends GunRefitScreen {
             if (invSlot < 0 && !player.isCreative()) {
                 continue;
             }
-            candidates.add(stack);
-            candidateInvSlots.add(invSlot);
+            found.add(new Candidate(stack, invSlot, nameOf(stack), entry.getKey().getNamespace()));
+        }
+        found.sort(candidateComparator());
+        candidates.clear();
+        candidateInvSlots.clear();
+        for (Candidate candidate : found) {
+            candidates.add(candidate.stack());
+            candidateInvSlots.add(candidate.invSlot());
         }
         selected = 0;
         scroll = 0;
         samplesDirty = true;
+    }
+
+    /**
+     * 候选排序：**已拥有的（可用）配件永远置顶**，其次才按玩家选的排序方式。
+     *
+     * <p>置顶是独立的一层、优先级高于排序方式：创造模式下列表里混着大量没带在身上的配件
+     * （图标盖灰、点了装不上），把真正能装的排到最前面，少滚一半列表。生存模式下列表本来
+     * 就只剩背包里的，这一层退化成空操作。</p>
+     */
+    private Comparator<Candidate> candidateComparator() {
+        Comparator<Candidate> byField = switch (sortField) {
+            case NAME -> Comparator.comparing((Candidate c) -> c.name().toLowerCase(Locale.ROOT))
+                    .thenComparing(c -> c.modId().toLowerCase(Locale.ROOT));
+            case MOD -> Comparator.comparing((Candidate c) -> c.modId().toLowerCase(Locale.ROOT))
+                    .thenComparing(c -> c.name().toLowerCase(Locale.ROOT));
+        };
+        if (!sortAscending) {
+            byField = byField.reversed();
+        }
+        return Comparator.comparingInt((Candidate c) -> c.invSlot() >= 0 ? 0 : 1).thenComparing(byField);
     }
 
     /** 搜索匹配：本地化后的显示名，大小写不敏感的子串。玩家搜的是眼睛看到的名字。 */
@@ -801,6 +884,26 @@ public class ZtRefitScreen extends GunRefitScreen {
         if (searchBox != null) {
             searchBox.render(graphics, mouseX, mouseY, partialTick);
         }
+        drawSortButton(graphics, mouseX, mouseY);
+    }
+
+    /**
+     * 底部这一行右侧的排序按钮：显示当前排序方式（如"名称 A-Z"），点击循环切换。
+     *
+     * <p>自绘而非用 {@link #button}：那个 helper 是安装/卸下的绿红语义（primary/secondary），
+     * 排序是中性控件，套上去会让人误以为它是个"确认/取消"。观感对齐同一行的搜索框。</p>
+     */
+    private void drawSortButton(GuiGraphics graphics, int mouseX, int mouseY) {
+        Rect rect = sortRect();
+        boolean hovered = !dragging && rect.contains(mouseX, mouseY);
+        roundedFill(graphics, rect.x(), rect.y(), rect.w(), rect.h(), hovered ? 0x40FFFFFF : 0x40000000);
+        roundedBorder(graphics, rect.x(), rect.y(), rect.w(), rect.h(), hovered ? 0x88FFFFFF : HAIRLINE);
+        graphics.drawCenteredString(this.font, truncate(sortLabel(), rect.w() - 6),
+                rect.x() + rect.w() / 2, rect.y() + 2, hovered ? TEXT : TEXT_DIM);
+        if (hovered) {
+            tooltip(Component.literal(I18n.get("gui.z_tweaks.refit.sort.tooltip")),
+                    (int) mouseX, (int) mouseY);
+        }
     }
 
     /**
@@ -1027,6 +1130,11 @@ public class ZtRefitScreen extends GunRefitScreen {
                 }
             }
         }
+        // 排序按钮：与搜索框同一行，只在候选框可见时存在（几何与绘制同源：sortRect）
+        if (candidateListVisible() && sortRect().contains(mouseX, mouseY)) {
+            cycleSort();
+            return true;
+        }
         // 详情条按钮
         if (installRect().contains(mouseX, mouseY)) {
             installSelected();
@@ -1077,9 +1185,9 @@ public class ZtRefitScreen extends GunRefitScreen {
 
     @Override
     public boolean mouseScrolled(double mouseX, double mouseY, double delta) {
-        // 指针在候选面板内（但不在搜索框上）才翻列表，其余位置一律给相机缩放
+        // 指针在候选面板内（但不在底部搜索框 / 排序按钮上）才翻列表，其余位置一律给相机缩放
         if (candidateListVisible() && listRect().contains(mouseX, mouseY)
-                && !searchRect().contains(mouseX, mouseY)) {
+                && !searchRect().contains(mouseX, mouseY) && !sortRect().contains(mouseX, mouseY)) {
             scroll -= (int) Math.signum(delta);
             return true;
         }
@@ -1233,6 +1341,16 @@ public class ZtRefitScreen extends GunRefitScreen {
         boolean contains(double mx, double my) {
             return mx >= x && mx < x + w && my >= y && my < y + h;
         }
+    }
+
+    /** 排序字段：按显示名，还是按模组（配件 id 的命名空间，即定义它的枪包/mod）。 */
+    private enum SortField {NAME, MOD}
+
+    /**
+     * 候选列表里一行所需的全部信息，在 {@link #rebuildCandidates()} 里一次性算好：
+     * 名字（本地化显示名，排序与绘制共用，避免每行重复查索引）与模组命名空间。
+     */
+    private record Candidate(ItemStack stack, int invSlot, String name, String modId) {
     }
 
     /** 候选面板当前能显示几行。几何与 {@link #listRect()} 同源，不会与绘制漂移。 */

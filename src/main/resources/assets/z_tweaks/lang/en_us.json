@@ -33,6 +33,11 @@
   "gui.z_tweaks.refit.candidates.empty": "no attachments for this slot",
   "gui.z_tweaks.refit.candidates.no_match": "no matching attachment",
   "gui.z_tweaks.refit.search.hint": "Search…",
+  "gui.z_tweaks.refit.sort.name.asc": "Name A-Z",
+  "gui.z_tweaks.refit.sort.name.desc": "Name Z-A",
+  "gui.z_tweaks.refit.sort.mod.asc": "Mod A-Z",
+  "gui.z_tweaks.refit.sort.mod.desc": "Mod Z-A",
+  "gui.z_tweaks.refit.sort.tooltip": "Sort order: click to cycle (Name / Mod × A-Z / Z-A)",
 
   "gui.z_tweaks.refit.candidate": "candidate: %s",
   "gui.z_tweaks.refit.slot.scope": "Scope",

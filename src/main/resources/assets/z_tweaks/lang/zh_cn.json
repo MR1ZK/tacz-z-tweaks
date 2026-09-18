@@ -33,6 +33,11 @@
   "gui.z_tweaks.refit.candidates.empty": "这个槽位没有可用配件",
   "gui.z_tweaks.refit.candidates.no_match": "没有匹配的配件",
   "gui.z_tweaks.refit.search.hint": "搜索…",
+  "gui.z_tweaks.refit.sort.name.asc": "名称 A-Z",
+  "gui.z_tweaks.refit.sort.name.desc": "名称 Z-A",
+  "gui.z_tweaks.refit.sort.mod.asc": "模组 A-Z",
+  "gui.z_tweaks.refit.sort.mod.desc": "模组 Z-A",
+  "gui.z_tweaks.refit.sort.tooltip": "排序方式：点击循环切换（名称 / 模组 × A-Z / Z-A）",
 
   "gui.z_tweaks.refit.candidate": "候选：%s",
   "gui.z_tweaks.refit.slot.scope": "瞄具",
