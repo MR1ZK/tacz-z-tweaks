@@ -177,6 +177,10 @@ public class ZtRefitScreen extends GunRefitScreen {
     private int[] infoColumnLines = new int[INFO_COLUMNS];
     /** 指针当前悬停在哪一列（每帧由 {@link #drawGunInfo} 记下，供滚轮决定滚哪一列）。 */
     private int infoHoverColumn = -1;
+    /** 配件描述列的滚动偏移，以及"当前是哪个配件"的键（换配件就回到顶部）。 */
+    private int attachScroll = 0;
+    @Nullable
+    private String attachKey = null;
     /** 缓存键：AttachmentDataUtils 是离线全量重算，不能每帧调，按枪 id + NBT 缓存。 */
     @Nullable
     private ResourceLocation gunInfoId = null;
@@ -205,6 +209,8 @@ public class ZtRefitScreen extends GunRefitScreen {
         this.lastRowClickIndex = -1;
         this.lastRowClickButton = -1;
         Arrays.fill(this.infoScroll, 0);
+        this.attachScroll = 0;
+        this.attachKey = null;
         VirtualAssembly.clear();
         addLaserSliders();
         addSearchBox();
@@ -824,32 +830,9 @@ public class ZtRefitScreen extends GunRefitScreen {
         graphics.fill(x, y + 1, x + 2, y + height - 1, ACCENT);
 
         int leftWidth = (int) (width * 0.40f);
-        int textW = leftWidth - 10;
 
         if (!candidates.isEmpty()) {
-            ItemStack candidate = candidates.get(Math.min(selected, candidates.size() - 1));
-            // 名称行：图标 + 名字并排，比纯文字更易扫读
-            graphics.renderItem(candidate, x + 6, y + 4);
-            graphics.drawString(this.font, truncate(nameOf(candidate), textW - 20), x + 26, y + 8, ACCENT, false);
-            int line = y + 24;
-            for (String desc : describe(candidate)) {
-                graphics.drawString(this.font, truncate(desc, textW), x + 6, line, TEXT_DIM, false);
-                line += 10;
-            }
-            for (int i = 0; i < Math.min(2, neutral.size()); i++) {
-                graphics.drawString(this.font,
-                        truncate(I18n.get("gui.z_tweaks.refit.neutral", neutral.get(i)), textW),
-                        x + 6, line, TEXT_MUTED, false);
-                line += 10;
-            }
-            if (ZtConfig.DEBUG_SAMPLES.get()) {
-                for (String sample : samples) {
-                    graphics.drawString(this.font,
-                            truncate(I18n.get("gui.z_tweaks.refit.native", sample), textW),
-                            x + 6, line, 0xFF4FC3C3, false);
-                    line += 10;
-                }
-            }
+            drawAttachmentInfo(graphics, x, y, leftWidth);
         } else if (RefitTransform.getCurrentTransformType() == AttachmentType.NONE) {
             // 概览态没有候选配件可讲，整条详情条拿来放枪械参数
             drawGunInfo(graphics, x, y, width, mouseX, mouseY);
@@ -1096,6 +1079,12 @@ public class ZtRefitScreen extends GunRefitScreen {
         if (candidateListVisible() && listRect().contains(mouseX, mouseY)
                 && !searchRect().contains(mouseX, mouseY)) {
             scroll -= (int) Math.signum(delta);
+            return true;
+        }
+        // 选中配件时：指针落在详情条左列就滚配件描述
+        if (candidateListVisible() && !candidates.isEmpty()
+                && attachColumnRect().contains(mouseX, mouseY)) {
+            attachScroll -= (int) Math.signum(delta);
             return true;
         }
         // 概览态：指针落在详情条上就滚信息卡，滚的是指针所在的那一列
@@ -1501,6 +1490,59 @@ public class ZtRefitScreen extends GunRefitScreen {
     /** 详情条矩形：概览态下滚轮落在这里才滚信息卡。 */
     private Rect detailRect() {
         return new Rect(PAD, detailY(), this.width - PAD * 2, DETAIL_H);
+    }
+
+    /** 详情条左列（配件名字 + 描述）矩形：选中配件时滚轮落在这里才滚描述。 */
+    private Rect attachColumnRect() {
+        int width = this.width - PAD * 2;
+        return new Rect(PAD, detailY(), (int) (width * 0.40f), DETAIL_H);
+    }
+
+    /**
+     * 配件卡的左列（名字 + 描述）：排版与概览态信息卡对齐 —— {@link #INFO_SCALE} 缩放、
+     * 按列宽换行、滚轮可翻。
+     *
+     * <p>名字仍用强调色而不是白色：它标的是"当前查看的配件"，跟候选列表的选中态呼应。
+     * 换配件时滚动回到顶部（用名字 + 下标当键，换槽位由 {@link #init()} 归零）。</p>
+     */
+    private void drawAttachmentInfo(GuiGraphics graphics, int x, int y, int columnWidth) {
+        ItemStack candidate = candidates.get(Math.min(selected, candidates.size() - 1));
+        String key = nameOf(candidate) + "@" + selected;
+        if (!key.equals(attachKey)) {
+            attachKey = key;
+            attachScroll = 0;
+        }
+        List<Component> lines = new ArrayList<>();
+        lines.add(Component.literal(nameOf(candidate)).withStyle(ChatFormatting.AQUA));
+        for (String desc : describe(candidate)) {
+            lines.add(Component.literal(desc).withStyle(ChatFormatting.GRAY));
+        }
+        for (int i = 0; i < Math.min(2, neutral.size()); i++) {
+            lines.add(Component.literal(I18n.get("gui.z_tweaks.refit.neutral", neutral.get(i)))
+                    .withStyle(ChatFormatting.DARK_GRAY));
+        }
+        if (ZtConfig.DEBUG_SAMPLES.get()) {
+            for (String sample : samples) {
+                lines.add(Component.literal(I18n.get("gui.z_tweaks.refit.native", sample))
+                        .withStyle(ChatFormatting.DARK_GRAY));
+            }
+        }
+
+        graphics.renderItem(candidate, x + 6, y + 4);
+        int rows = Math.max(1, (int) ((DETAIL_H - 12) / (INFO_LINE_H * INFO_SCALE)));
+        List<FormattedCharSequence> wrapped = new ArrayList<>();
+        for (Component line : lines) {
+            wrapped.addAll(this.font.split(line, (int) ((columnWidth - 32) / INFO_SCALE)));
+        }
+        attachScroll = Mth.clamp(attachScroll, 0, Math.max(0, wrapped.size() - rows));
+        PoseStack pose = graphics.pose();
+        pose.pushPose();
+        pose.translate(x + 26, y + 4, 0);
+        pose.scale(INFO_SCALE, INFO_SCALE, 1f);
+        for (int i = attachScroll; i < Math.min(wrapped.size(), attachScroll + rows); i++) {
+            graphics.drawString(this.font, wrapped.get(i), 0, (i - attachScroll) * INFO_LINE_H, 0xFFFFFF, false);
+        }
+        pose.popPose();
     }
 
     private List<String> describe(ItemStack stack) {
