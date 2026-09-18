@@ -28,6 +28,8 @@ side = "BOTH"
 [[dependencies.z_tweaks]]
 modId = "tacz"
 mandatory = true
-versionRange = "[1.1.8,)"
+# 不限制版本：开发基于 1.1.8-hotfix，但 API 调用集中在公开包，硬卡下限只会挡住能跑的整合包。
+# 空字符串 = 任意版本（Forge MavenVersionAdapter 对空 range 的约定）。
+versionRange = ""
 ordering = "AFTER"
 side = "BOTH"
