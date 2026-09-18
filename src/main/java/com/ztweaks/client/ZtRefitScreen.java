@@ -5,6 +5,7 @@ import com.tacz.guns.api.entity.IGunOperator;
 import com.tacz.guns.api.item.IAttachment;
 import com.tacz.guns.api.item.IGun;
 import com.tacz.guns.api.item.attachment.AttachmentType;
+import com.tacz.guns.api.item.builder.AmmoItemBuilder;
 import com.tacz.guns.api.item.builder.AttachmentItemBuilder;
 import com.tacz.guns.api.modifier.IAttachmentModifier;
 import com.tacz.guns.client.animation.screen.RefitTransform;
@@ -26,7 +27,9 @@ import com.tacz.guns.resource.pojo.data.attachment.AttachmentData;
 import com.tacz.guns.resource.pojo.data.gun.GunData;
 import com.tacz.guns.sound.SoundManager;
 import com.ztweaks.config.ZtConfig;
+import net.minecraft.Util;
 import net.minecraft.client.gui.GuiGraphics;
+import net.minecraft.client.gui.components.EditBox;
 import net.minecraft.client.player.LocalPlayer;
 import net.minecraft.client.resources.language.I18n;
 import net.minecraft.network.chat.Component;
@@ -65,7 +68,11 @@ public class ZtRefitScreen extends GunRefitScreen {
     /** 候选面板宽度与内部两栏高度：绘制与命中检测共用 {@link #listRect()}，不再各写一份。 */
     private static final int LIST_W = 168;
     private static final int LIST_HEADER = 15;
-    private static final int LIST_FOOTER = 11;
+    /** 候选面板底部预留给搜索框的高度（原"滚轮=翻页"提示行只有 11px，放不下输入框）。 */
+    private static final int LIST_FOOTER = 17;
+    private static final int SEARCH_H = 12;
+    /** 双击阈值，与 MC 原生 AbstractContainerScreen 一致。 */
+    private static final long DOUBLE_CLICK_MS = 250L;
 
     // ------------------------------------------------------------------ 调色板
     // 深色玻璃面板 + TACZ 青强调色：与 TACZ 军事风一致，同时把原来散落各处的魔法色值收拢到一处。
@@ -120,6 +127,17 @@ public class ZtRefitScreen extends GunRefitScreen {
     private boolean showNativeBars = false;
     private boolean samplesDirty = true;
 
+    /** 候选面板底部的搜索框（概览态随候选框一起隐藏）。 */
+    @Nullable
+    private EditBox searchBox = null;
+    /** 当前搜索词。切槽位时清空：换槽位就是换一批配件，旧关键词大概率不适用。 */
+    private String searchQuery = "";
+
+    /** 上一次点击候选条目的时间戳 / 下标 / 鼠标键，用于双击判定。 */
+    private long lastRowClickTime = 0L;
+    private int lastRowClickIndex = -1;
+    private int lastRowClickButton = -1;
+
     private String popup = "";
     private long popupUntil = 0;
 
@@ -138,8 +156,42 @@ public class ZtRefitScreen extends GunRefitScreen {
         this.scroll = 0;
         this.samplesDirty = true;
         this.hoveredRow = -1;
+        this.lastRowClickTime = 0L;
+        this.lastRowClickIndex = -1;
+        this.lastRowClickButton = -1;
         VirtualAssembly.clear();
         addLaserSliders();
+        addSearchBox();
+    }
+
+    /**
+     * 候选面板底部的搜索框。
+     *
+     * <p>{@code init()} 会在切槽位与服务端刷新时重建，所以这里用 {@link #searchQuery}
+     * 把词接回来——只在 {@link #selectSlot} 里清空，避免装完一件就把搜索词丢了。</p>
+     */
+    private void addSearchBox() {
+        Rect rect = searchRect();
+        EditBox box = new EditBox(this.font, rect.x(), rect.y(), rect.w(), rect.h(),
+                Component.translatable("gui.z_tweaks.refit.search.hint"));
+        box.setMaxLength(32);
+        box.setValue(searchQuery);
+        box.setResponder(value -> {
+            searchQuery = value;
+            // 候选列表按 cachedType 做缓存，置空才能触发下一帧重建
+            cachedType = null;
+            selected = 0;
+            scroll = 0;
+            samplesDirty = true;
+        });
+        this.searchBox = box;
+        addRenderableWidget(box);
+    }
+
+    /** 搜索框矩形：贴候选面板底部内侧，几何与 {@link #listRect()} 同源。 */
+    private Rect searchRect() {
+        Rect list = listRect();
+        return new Rect(list.x() + 4, list.y() + list.h() - SEARCH_H - 2, list.w() - 8, SEARCH_H);
     }
 
     /**
@@ -250,12 +302,20 @@ public class ZtRefitScreen extends GunRefitScreen {
             if (!iGun.allowAttachment(gun, stack)) {
                 continue;
             }
+            if (!searchQuery.isBlank() && !matchesQuery(nameOf(stack))) {
+                continue;
+            }
             candidates.add(stack);
             candidateInvSlots.add(findInventorySlot(inventory, entry.getKey()));
         }
         selected = 0;
         scroll = 0;
         samplesDirty = true;
+    }
+
+    /** 搜索匹配：本地化后的显示名，大小写不敏感的子串。玩家搜的是眼睛看到的名字。 */
+    private boolean matchesQuery(String name) {
+        return name.toLowerCase(Locale.ROOT).contains(searchQuery.toLowerCase(Locale.ROOT));
     }
 
     private static int findInventorySlot(Inventory inventory, ResourceLocation id) {
@@ -455,7 +515,7 @@ public class ZtRefitScreen extends GunRefitScreen {
         drawSlotBar(graphics, mouseX, mouseY);
         // 概览态不画候选框：空面板 + "0" 徽标是纯噪音。隐藏后那块区域交还给 3D 预览的拖拽/滚轮。
         if (candidateListVisible()) {
-            drawCandidateList(graphics, mouseX, mouseY);
+            drawCandidateList(graphics, mouseX, mouseY, partialTick);
         } else {
             hoveredRow = -1;
         }
@@ -589,7 +649,7 @@ public class ZtRefitScreen extends GunRefitScreen {
         return new Rect(list.x() + 3, list.y() + LIST_HEADER + i * ROW_H, list.w() - 6, ROW_H - 2);
     }
 
-    private void drawCandidateList(GuiGraphics graphics, int mouseX, int mouseY) {
+    private void drawCandidateList(GuiGraphics graphics, int mouseX, int mouseY, float partialTick) {
         Rect list = listRect();
         int x = list.x();
         int y = list.y();
@@ -615,8 +675,11 @@ public class ZtRefitScreen extends GunRefitScreen {
         int listTop = y + LIST_HEADER;
 
         if (candidates.isEmpty()) {
-            graphics.drawString(this.font, I18n.get("gui.z_tweaks.refit.candidates.empty"),
-                    x + 6, listTop + 4, TEXT_MUTED, false);
+            // 空列表有两种成因，不能混用一句：槽位本来就没配件 vs 被搜索词筛没了
+            String key = searchQuery.isBlank()
+                    ? "gui.z_tweaks.refit.candidates.empty"
+                    : "gui.z_tweaks.refit.candidates.no_match";
+            graphics.drawString(this.font, I18n.get(key), x + 6, listTop + 4, TEXT_MUTED, false);
         }
 
         // 裁剪：滚动/悬停的行不会越出面板边线
@@ -667,8 +730,10 @@ public class ZtRefitScreen extends GunRefitScreen {
             graphics.fill(trackX, thumbY, trackX + 2, thumbY + thumbH, 0xAA55FFFF);
         }
 
-        graphics.drawString(this.font, I18n.get("gui.z_tweaks.refit.candidates.scroll"),
-                x + 6, y + height - LIST_FOOTER + 2, TEXT_MUTED, false);
+        // 搜索框：面板是在 super.render 之后画的，不在这里补画一次会被面板盖住
+        if (searchBox != null) {
+            searchBox.render(graphics, mouseX, mouseY, partialTick);
+        }
     }
 
     /**
@@ -723,6 +788,15 @@ public class ZtRefitScreen extends GunRefitScreen {
                             x + 6, line, 0xFF4FC3C3, false);
                     line += 10;
                 }
+            }
+        } else if (RefitTransform.getCurrentTransformType() == AttachmentType.NONE) {
+            // 概览态没有候选配件可看，详情条左侧改显示枪械本身的描述
+            graphics.drawString(this.font, truncate(gunStack().getHoverName().getString(), textW),
+                    x + 6, y + 8, ACCENT, false);
+            int gunLine = y + 24;
+            for (String desc : describeGun()) {
+                graphics.drawString(this.font, truncate(desc, textW), x + 6, gunLine, TEXT_DIM, false);
+                gunLine += 10;
             }
         }
 
@@ -892,8 +966,23 @@ public class ZtRefitScreen extends GunRefitScreen {
             int rows = visibleRows();
             for (int i = 0; i < rows && scroll + i < candidates.size(); i++) {
                 if (rowRect(list, i).contains(mouseX, mouseY)) {
-                    selected = scroll + i;
+                    int index = scroll + i;
+                    // 双击直接装上：省掉"点配件 → 点安装"那一步。判定照抄 MC 原生
+                    // AbstractContainerScreen（本界面继承的是 Screen，拿不到那份实现）。
+                    // 记的是候选下标而不是屏幕行号：两击之间滚一下滚轮，行号就漂移了。
+                    long now = Util.getMillis();
+                    boolean doubleClick = button == 0 && index == lastRowClickIndex
+                            && lastRowClickButton == 0 && now - lastRowClickTime < DOUBLE_CLICK_MS;
+                    lastRowClickTime = now;
+                    lastRowClickIndex = index;
+                    lastRowClickButton = button;
+                    selected = index;
                     samplesDirty = true;
+                    if (doubleClick) {
+                        // 装完立刻作废，否则第三击又会被当成一次双击
+                        lastRowClickIndex = -1;
+                        installSelected();
+                    }
                     return true;
                 }
             }
@@ -948,8 +1037,9 @@ public class ZtRefitScreen extends GunRefitScreen {
 
     @Override
     public boolean mouseScrolled(double mouseX, double mouseY, double delta) {
-        // 指针在候选面板内才翻列表，其余位置一律给相机缩放 —— 与视觉边界一致，不会误触
-        if (candidateListVisible() && listRect().contains(mouseX, mouseY)) {
+        // 指针在候选面板内（但不在搜索框上）才翻列表，其余位置一律给相机缩放
+        if (candidateListVisible() && listRect().contains(mouseX, mouseY)
+                && !searchRect().contains(mouseX, mouseY)) {
             scroll -= (int) Math.signum(delta);
             return true;
         }
@@ -966,12 +1056,19 @@ public class ZtRefitScreen extends GunRefitScreen {
         }
         if (RefitTransform.changeRefitScreenView(
                 type == RefitTransform.getCurrentTransformType() ? AttachmentType.NONE : type)) {
+            // 换槽位就是换一批配件，旧搜索词留着只会让人以为"列表怎么是空的"
+            this.searchQuery = "";
             this.init();
         }
     }
 
     @Override
     public boolean keyPressed(int keyCode, int scanCode, int modifiers) {
+        // 搜索框聚焦时把按键交回给 super：本方法在 super 之前就吞掉了 1–6 / 上下键 /
+        // Enter / R / U，不早退的话输入框里连退格和方向键都用不了。
+        if (searchBox != null && searchBox.isFocused()) {
+            return super.keyPressed(keyCode, scanCode, modifiers);
+        }
         // 1–6 选槽位，上下键切换候选配件
         if (keyCode >= GLFW.GLFW_KEY_1 && keyCode <= GLFW.GLFW_KEY_6) {
             List<AttachmentType> types = slotTypes();
@@ -1178,6 +1275,63 @@ public class ZtRefitScreen extends GunRefitScreen {
                     .orElse(id.getPath());
         }
         return stack.getHoverName().getString();
+    }
+
+    /**
+     * 概览态的枪械描述：与配件的 {@link #describe} 对称 —— 先取枪包作者写的文案，
+     * 没有就用数据拼一行摘要；没有文案时绝不造假文案。
+     *
+     * <p>{@code GunIndexPOJO.getTooltip()} 是官方唯一在用的描述字段（物品 tooltip 里
+     * 最多显示 3 行），但很多枪包不写，会是 null。兜底摘要取类型 / 口径 / 射速 /
+     * 弹匣容量，全部是 {@link GunData} 上现成的。</p>
+     */
+    private List<String> describeGun() {
+        List<String> lines = new ArrayList<>();
+        ItemStack gun = gunStack();
+        IGun iGun = IGun.getIGunOrNull(gun);
+        if (iGun == null) {
+            return lines;
+        }
+        CommonGunIndex index = TimelessAPI.getCommonGunIndex(iGun.getGunId(gun)).orElse(null);
+        if (index == null) {
+            return lines;
+        }
+        String tooltip = index.getPojo().getTooltip();
+        if (tooltip != null) {
+            for (String part : I18n.get(tooltip).split("\n")) {
+                if (!part.isBlank() && lines.size() < 3) {
+                    lines.add(part);
+                }
+            }
+            if (!lines.isEmpty()) {
+                return lines;
+            }
+        }
+        GunData gunData = index.getGunData();
+        StringBuilder summary = new StringBuilder();
+        String typeKey = "tacz.type." + index.getType() + ".name";
+        String type = I18n.get(typeKey);
+        if (!type.equals(typeKey)) {
+            summary.append(type);
+        }
+        ItemStack ammo = AmmoItemBuilder.create().setId(gunData.getAmmoId()).build();
+        String ammoName = ammo.getHoverName().getString();
+        if (!ammoName.isBlank()) {
+            appendSegment(summary, ammoName);
+        }
+        appendSegment(summary, I18n.get("gui.z_tweaks.refit.gun.rpm", gunData.getRoundsPerMinute()));
+        appendSegment(summary, I18n.get("gui.z_tweaks.refit.gun.mag", gunData.getAmmoAmount()));
+        if (summary.length() > 0) {
+            lines.add(summary.toString());
+        }
+        return lines;
+    }
+
+    private static void appendSegment(StringBuilder builder, String segment) {
+        if (builder.length() > 0) {
+            builder.append("  ·  ");
+        }
+        builder.append(segment);
     }
 
     private List<String> describe(ItemStack stack) {
