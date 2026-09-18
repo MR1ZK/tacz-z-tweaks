@@ -6,7 +6,14 @@ import com.tacz.guns.api.item.IAttachment;
 import com.tacz.guns.api.item.IGun;
 import com.tacz.guns.api.item.attachment.AttachmentType;
 import com.tacz.guns.api.item.builder.AmmoItemBuilder;
+import com.tacz.guns.api.item.builder.AmmoItemBuilder;
 import com.tacz.guns.api.item.builder.AttachmentItemBuilder;
+import com.tacz.guns.client.resource.ClientAssetsManager;
+import com.tacz.guns.client.resource.pojo.PackInfo;
+import com.tacz.guns.config.sync.SyncConfig;
+import com.tacz.guns.resource.pojo.data.gun.Bolt;
+import com.tacz.guns.resource.pojo.data.gun.ExplosionData;
+import com.tacz.guns.util.AttachmentDataUtils;
 import com.tacz.guns.api.modifier.IAttachmentModifier;
 import com.tacz.guns.client.animation.screen.RefitTransform;
 import com.tacz.guns.client.gui.GunRefitScreen;
@@ -32,19 +39,26 @@ import net.minecraft.client.gui.GuiGraphics;
 import net.minecraft.client.gui.components.EditBox;
 import net.minecraft.client.player.LocalPlayer;
 import net.minecraft.client.resources.language.I18n;
+import net.minecraft.ChatFormatting;
+import net.minecraft.nbt.CompoundTag;
 import net.minecraft.network.chat.Component;
+import net.minecraft.network.chat.MutableComponent;
 import net.minecraft.network.chat.TextColor;
 import net.minecraft.resources.ResourceLocation;
+import net.minecraft.util.FormattedCharSequence;
+import net.minecraft.util.Mth;
 import net.minecraft.world.entity.player.Inventory;
 import net.minecraft.world.item.ItemStack;
 import org.lwjgl.glfw.GLFW;
 
 import javax.annotation.Nullable;
+import java.text.DecimalFormat;
 import java.util.ArrayList;
 import java.util.Comparator;
 import java.util.List;
 import java.util.Locale;
 import java.util.Map;
+import java.util.Objects;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 
@@ -73,6 +87,13 @@ public class ZtRefitScreen extends GunRefitScreen {
     private static final int SEARCH_H = 12;
     /** 双击阈值，与 MC 原生 AbstractContainerScreen 一致。 */
     private static final long DOUBLE_CLICK_MS = 250L;
+    /** 概览态信息卡的列数与每列行数：详情条 68px 高，行距 9px，5 行刚好不压到按钮。 */
+    private static final int INFO_COLUMNS = 3;
+    private static final int INFO_ROWS = 5;
+    /** 与 TACZ 的 ClientGunTooltip 同款格式器（带 % 后缀 = 自动乘 100，传小数比例进去）。 */
+    private static final DecimalFormat DAMAGE_FORMAT = new DecimalFormat("#.##");
+    private static final DecimalFormat PERCENT_FORMAT = new DecimalFormat("#.##%");
+    private static final DecimalFormat PERCENT_1_FORMAT = new DecimalFormat("#.#%");
 
     // ------------------------------------------------------------------ 调色板
     // 深色玻璃面板 + TACZ 青强调色：与 TACZ 军事风一致，同时把原来散落各处的魔法色值收拢到一处。
@@ -137,6 +158,17 @@ public class ZtRefitScreen extends GunRefitScreen {
     private long lastRowClickTime = 0L;
     private int lastRowClickIndex = -1;
     private int lastRowClickButton = -1;
+
+    /** 概览态信息卡的一行。icon 非空时画在文字左侧（目前只有口径名带弹药图标）。 */
+    private record InfoLine(Component text, @Nullable ItemStack icon) {
+    }
+
+    private final List<InfoLine> gunInfo = new ArrayList<>();
+    /** 缓存键：AttachmentDataUtils 是离线全量重算，不能每帧调，按枪 id + NBT 缓存。 */
+    @Nullable
+    private ResourceLocation gunInfoId = null;
+    @Nullable
+    private CompoundTag gunInfoTag = null;
 
     private String popup = "";
     private long popupUntil = 0;
@@ -790,14 +822,8 @@ public class ZtRefitScreen extends GunRefitScreen {
                 }
             }
         } else if (RefitTransform.getCurrentTransformType() == AttachmentType.NONE) {
-            // 概览态没有候选配件可看，详情条左侧改显示枪械本身的描述
-            graphics.drawString(this.font, truncate(gunStack().getHoverName().getString(), textW),
-                    x + 6, y + 8, ACCENT, false);
-            int gunLine = y + 24;
-            for (String desc : describeGun()) {
-                graphics.drawString(this.font, truncate(desc, textW), x + 6, gunLine, TEXT_DIM, false);
-                gunLine += 10;
-            }
+            // 概览态没有候选配件可讲，整条详情条拿来放枪械参数
+            drawGunInfo(graphics, x, y, width);
         }
 
         // Pros/Cons 两栏：不写"优点 N / 缺点 N"标题，靠栏色（绿/红）与条目前缀区分；
@@ -1278,60 +1304,155 @@ public class ZtRefitScreen extends GunRefitScreen {
     }
 
     /**
-     * 概览态的枪械描述：与配件的 {@link #describe} 对称 —— 先取枪包作者写的文案，
-     * 没有就用数据拼一行摘要；没有文案时绝不造假文案。
+     * 概览态信息卡：把 TACZ 枪械 tooltip 的每一行在详情条里自己画一遍，不整块渲染。
      *
-     * <p>{@code GunIndexPOJO.getTooltip()} 是官方唯一在用的描述字段（物品 tooltip 里
-     * 最多显示 3 行），但很多枪包不写，会是 null。兜底摘要取类型 / 口径 / 射速 /
-     * 弹匣容量，全部是 {@link GunData} 上现成的。</p>
+     * <p>文案一律复用 TACZ 自己的 lang key（{@code tooltip.tacz.gun.*}），数值走
+     * {@link AttachmentDataUtils} 的离线计算 —— 与 TACZ 的 {@code ClientGunTooltip}
+     * 同一套来源，所以中英翻译、百分比口径都对得上。刻意不复制它的两个显示风格分支
+     * （按弹丸显示伤害、按百分比显示弹容）：那两个是 tooltip 的表现层选择，
+     * 我们这里是固定布局，只显示总伤害与 "当前/最大"。</p>
+     *
+     * <p>缓存是必须的：{@link AttachmentDataUtils} 每个方法都要遍历全部配件槽位重算，
+     * 类注释本身就写了"不应该频繁调用"。这里按枪 id + NBT 缓存，换枪或改装后自动重算。</p>
      */
-    private List<String> describeGun() {
-        List<String> lines = new ArrayList<>();
+    private List<InfoLine> gunInfoLines() {
         ItemStack gun = gunStack();
         IGun iGun = IGun.getIGunOrNull(gun);
         if (iGun == null) {
-            return lines;
+            gunInfo.clear();
+            gunInfoId = null;
+            gunInfoTag = null;
+            return gunInfo;
         }
-        CommonGunIndex index = TimelessAPI.getCommonGunIndex(iGun.getGunId(gun)).orElse(null);
+        ResourceLocation id = iGun.getGunId(gun);
+        CompoundTag tag = gun.getTag();
+        if (id.equals(gunInfoId) && Objects.equals(gunInfoTag, tag)) {
+            return gunInfo;
+        }
+        gunInfoId = id;
+        gunInfoTag = tag == null ? null : tag.copy();
+        gunInfo.clear();
+
+        CommonGunIndex index = TimelessAPI.getCommonGunIndex(id).orElse(null);
         if (index == null) {
-            return lines;
+            return gunInfo;
         }
+        GunData gunData = index.getGunData();
+        gunInfo.add(new InfoLine(
+                Component.literal(gun.getHoverName().getString()).withStyle(ChatFormatting.AQUA), null));
+
         String tooltip = index.getPojo().getTooltip();
         if (tooltip != null) {
             for (String part : I18n.get(tooltip).split("\n")) {
-                if (!part.isBlank() && lines.size() < 3) {
-                    lines.add(part);
+                if (!part.isBlank()) {
+                    gunInfo.add(new InfoLine(
+                            Component.literal(part).withStyle(ChatFormatting.GRAY), null));
                 }
             }
-            if (!lines.isEmpty()) {
-                return lines;
-            }
         }
-        GunData gunData = index.getGunData();
-        StringBuilder summary = new StringBuilder();
-        String typeKey = "tacz.type." + index.getType() + ".name";
-        String type = I18n.get(typeKey);
-        if (!type.equals(typeKey)) {
-            summary.append(type);
-        }
+
         ItemStack ammo = AmmoItemBuilder.create().setId(gunData.getAmmoId()).build();
-        String ammoName = ammo.getHoverName().getString();
-        if (!ammoName.isBlank()) {
-            appendSegment(summary, ammoName);
+        gunInfo.add(new InfoLine(
+                Component.literal(ammo.getHoverName().getString()).withStyle(ChatFormatting.GOLD), ammo));
+        // 膛内有弹且非开膛待击时 +1，与 TACZ 一致
+        int barrel = iGun.hasBulletInBarrel(gun) && gunData.getBolt() != Bolt.OPEN_BOLT ? 1 : 0;
+        int max = AttachmentDataUtils.getAmmoCountWithAttachment(gun, gunData) + barrel;
+        int current = iGun.getCurrentAmmoCount(gun) + barrel;
+        if (iGun.useInventoryAmmo(gun)) {
+            gunInfo.add(new InfoLine(Component.translatable("tooltip.tacz.gun.inventory_mode")
+                    .withStyle(ChatFormatting.YELLOW), null));
+        } else if (iGun.useDummyAmmo(gun)) {
+            gunInfo.add(new InfoLine(Component.literal(
+                            String.format("%d/%d (%d)", current, max, iGun.getDummyAmmoAmount(gun)))
+                    .withStyle(ChatFormatting.DARK_GRAY), null));
+        } else {
+            gunInfo.add(new InfoLine(Component.literal(String.format("%d/%d", current, max))
+                    .withStyle(ChatFormatting.DARK_GRAY), null));
         }
-        appendSegment(summary, I18n.get("gui.z_tweaks.refit.gun.rpm", gunData.getRoundsPerMinute()));
-        appendSegment(summary, I18n.get("gui.z_tweaks.refit.gun.mag", gunData.getAmmoAmount()));
-        if (summary.length() > 0) {
-            lines.add(summary.toString());
+
+        int level = iGun.getLevel(gun);
+        Component levelValue;
+        if (level >= iGun.getMaxLevel()) {
+            levelValue = Component.literal(String.format("%d (MAX)", level))
+                    .withStyle(ChatFormatting.DARK_PURPLE);
+        } else {
+            int toNext = iGun.getExpToNextLevel(gun);
+            int expCurrent = iGun.getExpCurrentLevel(gun);
+            // TACZ 原式是 int 整除后再乘 100f，非满级时恒为 0.0%；这里改成浮点除法
+            float percent = (toNext + expCurrent) == 0 ? 0f : expCurrent * 100f / (toNext + expCurrent);
+            levelValue = Component.literal(String.format("%d (%.1f%%)", level, percent))
+                    .withStyle(ChatFormatting.YELLOW);
         }
-        return lines;
+        gunInfo.add(new InfoLine(
+                Component.translatable("tooltip.tacz.gun.level").append(levelValue), null));
+        gunInfo.add(new InfoLine(Component.translatable("tooltip.tacz.gun.type")
+                .append(Component.translatable("tacz.type." + index.getType() + ".name")
+                        .withStyle(ChatFormatting.AQUA)), null));
+
+        MutableComponent damageValue = Component
+                .literal(DAMAGE_FORMAT.format(AttachmentDataUtils.getDamageWithAttachment(gun, gunData)))
+                .withStyle(ChatFormatting.AQUA);
+        ExplosionData explosion = gunData.getBulletData().getExplosionData();
+        if (explosion != null
+                && (AttachmentDataUtils.isExplodeEnabled(gun, gunData) || explosion.isExplode())) {
+            damageValue.append(" + " + DAMAGE_FORMAT.format(
+                            explosion.getDamage() * SyncConfig.DAMAGE_BASE_MULTIPLIER.get()))
+                    .append(Component.translatable("tooltip.tacz.gun.explosion"));
+        }
+        gunInfo.add(new InfoLine(
+                Component.translatable("tooltip.tacz.gun.damage").append(damageValue), null));
+
+        double armor = Mth.clamp(AttachmentDataUtils.getArmorIgnoreWithAttachment(gun, gunData), 0.0, 1.0);
+        gunInfo.add(new InfoLine(Component
+                .translatable("tooltip.tacz.gun.armor_ignore", PERCENT_FORMAT.format(armor))
+                .withStyle(ChatFormatting.GOLD), null));
+        gunInfo.add(new InfoLine(Component
+                .translatable("tooltip.tacz.gun.head_shot_multiplier",
+                        PERCENT_FORMAT.format(AttachmentDataUtils.getHeadshotMultiplier(gun, gunData)))
+                .withStyle(ChatFormatting.GOLD), null));
+        gunInfo.add(new InfoLine(Component
+                .translatable("tooltip.tacz.gun.movement_speed", PERCENT_1_FORMAT.format(
+                        -SyncConfig.WEIGHT_SPEED_MULTIPLIER.get()
+                                * AttachmentDataUtils.getWightWithAttachment(gun, gunData)))
+                .withStyle(ChatFormatting.RED), null));
+
+        PackInfo pack = ClientAssetsManager.INSTANCE.getPackInfo(id);
+        if (pack != null) {
+            gunInfo.add(new InfoLine(Component.translatable(pack.getName())
+                    .withStyle(ChatFormatting.BLUE).withStyle(ChatFormatting.ITALIC), null));
+        }
+        return gunInfo;
     }
 
-    private static void appendSegment(StringBuilder builder, String segment) {
-        if (builder.length() > 0) {
-            builder.append("  ·  ");
+    /** 把信息行按"先填满左列、再填下一列"铺进详情条，放不下的行直接丢。 */
+    private void drawGunInfo(GuiGraphics graphics, int x, int y, int width) {
+        int columnWidth = (width - 12) / INFO_COLUMNS;
+        int[] used = new int[INFO_COLUMNS];
+        for (InfoLine line : gunInfoLines()) {
+            int col = -1;
+            for (int c = 0; c < INFO_COLUMNS; c++) {
+                if (used[c] < INFO_ROWS) {
+                    col = c;
+                    break;
+                }
+            }
+            if (col < 0) {
+                break;
+            }
+            int colX = x + 6 + col * columnWidth;
+            int textX = colX;
+            if (line.icon() != null) {
+                graphics.renderItem(line.icon(), colX, y + 4 + used[col] * 9 - 3);
+                textX = colX + 18;
+            }
+            for (FormattedCharSequence seq : this.font.split(line.text(), columnWidth - (textX - colX) - 4)) {
+                if (used[col] >= INFO_ROWS) {
+                    break;
+                }
+                graphics.drawString(this.font, seq, textX, y + 4 + used[col] * 9, 0xFFFFFF, false);
+                used[col]++;
+            }
         }
-        builder.append(segment);
     }
 
     private List<String> describe(ItemStack stack) {
