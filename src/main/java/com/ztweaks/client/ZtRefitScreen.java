@@ -32,6 +32,7 @@ import com.tacz.guns.resource.pojo.data.gun.Bolt;
 import com.tacz.guns.resource.pojo.data.gun.GunData;
 import com.tacz.guns.sound.SoundManager;
 import com.ztweaks.config.ZtConfig;
+import com.ztweaks.preset.PresetStore;
 import com.mojang.blaze3d.vertex.PoseStack;
 import net.minecraft.Util;
 import net.minecraft.client.gui.GuiGraphics;
@@ -170,6 +171,29 @@ public class ZtRefitScreen extends GunRefitScreen {
     private boolean sortMenuOpen = false;
     /** 弹出层内容的滚动偏移（像素）。只有内容高过视口时才有意义，见 {@link #sortMenuRect()}。 */
     private int sortMenuScroll = 0;
+
+    /** 预设弹层是否展开、滚到哪；当前枪的预设列表只在打开与增删时重读盘。 */
+    private boolean presetMenuOpen = false;
+    private int presetMenuScroll = 0;
+    private final List<PresetStore.Preset> presets = new ArrayList<>();
+    /** 保存流程：名字输入框是否挂着、当前名字、以及"同名再来一次就覆盖"的第二次确认。 */
+    private boolean namingPreset = false;
+    private String presetName = "";
+    private boolean overwriteArmed = false;
+    @Nullable
+    private EditBox presetNameBox = null;
+    /** 干跑出来的"应用这份预设会发生什么"；非 null 时画确认面板（issue #10 的决定）。 */
+    @Nullable
+    private PresetPlan pendingPlan = null;
+    /** 从剪贴板读出来的预设，等玩家确认再落盘。 */
+    @Nullable
+    private PresetStore.Preset pendingImport = null;
+    /**
+     * 最近一次"应用或保存"的预设名。导出用它当目标 —— 导出这一行本身就是行，
+     * 拿"鼠标悬停的那份"当目标等于自指（想导出谁就得先把指针从谁身上移开）。
+     */
+    @Nullable
+    private String lastPresetName = null;
 
     /** 上一次点击候选条目的时间戳 / 下标 / 鼠标键，用于双击判定。 */
     private long lastRowClickTime = 0L;
@@ -982,6 +1006,17 @@ public class ZtRefitScreen extends GunRefitScreen {
         }
         syncPreview();
         drawDetail(graphics, mouseX, mouseY);
+        // 预设那一层：按钮 → 弹层 → 确认面板 → 名字输入，一层压一层（画在最后 = 命中判定排最前）
+        drawPresetButton(graphics, mouseX, mouseY);
+        if (presetMenuOpen) {
+            drawPresetMenu(graphics, mouseX, mouseY);
+        }
+        if (pendingPlan != null || pendingImport != null) {
+            drawPresetConfirm(graphics, mouseX, mouseY);
+        }
+        if (namingPreset && presetNameBox != null) {
+            presetNameBox.render(graphics, mouseX, mouseY, partialTick);
+        }
         if (showNativeBars && ZtConfig.DEBUG_NATIVE_BARS.get()) {
             GunPropertyDiagrams.draw(graphics, this.font, 11, 96);
         }
@@ -1245,6 +1280,209 @@ public class ZtRefitScreen extends GunRefitScreen {
      *
      * <p>弹出层展开期间按钮保持"按下"的样子，让玩家看得出这层是从哪冒出来的。</p>
      */
+    // ---------------------------------------------------------------- 预设（issue #10）
+
+    /** 弹层里的行：{@code 0..n-1} = 预设，其余是几个固定动作。与排序弹层同一套写法。 */
+    private static final int PM_SAVE = -1;
+    private static final int PM_IMPORT = -2;
+    private static final int PM_EXPORT = -3;
+    private static final int PM_SEP = -4;
+    private static final int PM_NONE = -5;
+    private static final int PRESET_MENU_W = 154;
+    /** 确认面板里两行：确认 / 取消。 */
+    private static final int PC_OK = 0;
+    private static final int PC_CANCEL = 1;
+
+    /** 详情条上的"预设"按钮，坐在安装 / 卸下的左边。概览态也画 —— 预设是整枪层面的事。 */
+    private Rect presetRect() {
+        Rect install = installRect();
+        return new Rect(install.x() - 68, install.y(), 64, 14);
+    }
+
+    private void drawPresetButton(GuiGraphics graphics, int mouseX, int mouseY) {
+        Rect rect = presetRect();
+        boolean hovered = !dragging && rect.contains(mouseX, mouseY);
+        boolean active = hovered || presetMenuOpen;
+        roundedFill(graphics, rect.x(), rect.y(), rect.w(), rect.h(), active ? 0x40FFFFFF : 0x40000000);
+        roundedBorder(graphics, rect.x(), rect.y(), rect.w(), rect.h(), active ? 0x88FFFFFF : HAIRLINE);
+        graphics.drawCenteredString(this.font, I18n.get("gui.z_tweaks.refit.preset.button"),
+                rect.x() + rect.w() / 2, rect.y() + 2, active ? TEXT : TEXT_DIM);
+        if (hovered) {
+            tooltip(Component.literal(I18n.get("gui.z_tweaks.refit.preset.tooltip")),
+                    (int) mouseX, (int) mouseY);
+        }
+    }
+
+    private List<Integer> presetMenuRows() {
+        List<Integer> rows = new ArrayList<>();
+        for (int i = 0; i < presets.size(); i++) {
+            rows.add(i);
+        }
+        rows.add(PM_SEP);
+        rows.add(PM_SAVE);
+        rows.add(PM_IMPORT);
+        rows.add(PM_EXPORT);
+        return rows;
+    }
+
+    private int presetMenuContentHeight() {
+        int height = MENU_PAD * 2;
+        for (int key : presetMenuRows()) {
+            height += key == PM_SEP ? MENU_SEP_H : MENU_ROW_H;
+        }
+        return height;
+    }
+
+    private int presetMenuMaxScroll() {
+        return Math.max(0, presetMenuContentHeight() - presetMenuRect().h());
+    }
+
+    /** 弹层外框：贴按钮上方、向上展开，并夹进窗口。预设多了就靠滚（与排序层同一条路子）。 */
+    private Rect presetMenuRect() {
+        Rect button = presetRect();
+        int bottom = button.y() - 2;
+        int height = Math.min(presetMenuContentHeight(),
+                Math.max(MENU_ROW_H * 2 + MENU_PAD * 2, bottom - 2));
+        int x = Math.min(button.x() + button.w() - PRESET_MENU_W, this.width - PRESET_MENU_W - 2);
+        return new Rect(Math.max(2, x), bottom - height, PRESET_MENU_W, height);
+    }
+
+    /** 鼠标落在弹层里的哪一行；落在内边距 / 分隔条 / 外面返回 {@link #PM_NONE}。 */
+    private int presetMenuKeyAt(double mouseX, double mouseY) {
+        Rect menu = presetMenuRect();
+        if (!menu.contains(mouseX, mouseY)) {
+            return PM_NONE;
+        }
+        int contentY = (int) (mouseY - menu.y()) + presetMenuScroll;
+        int y = MENU_PAD;
+        for (int key : presetMenuRows()) {
+            int height = key == PM_SEP ? MENU_SEP_H : MENU_ROW_H;
+            if (contentY >= y && contentY < y + height) {
+                return key == PM_SEP ? PM_NONE : key;
+            }
+            y += height;
+        }
+        return PM_NONE;
+    }
+
+    private void drawPresetMenu(GuiGraphics graphics, int mouseX, int mouseY) {
+        Rect menu = presetMenuRect();
+        presetMenuScroll = Mth.clamp(presetMenuScroll, 0, presetMenuMaxScroll());
+        roundedFill(graphics, menu.x(), menu.y(), menu.w(), menu.h(), 0xF0101010);
+        roundedBorder(graphics, menu.x(), menu.y(), menu.w(), menu.h(), 0x88FFFFFF);
+        graphics.enableScissor(menu.x() + 1, menu.y() + 1, menu.x() + menu.w() - 1, menu.y() + menu.h() - 1);
+        boolean inside = menu.contains(mouseX, mouseY);
+        int hoveredKey = inside ? presetMenuKeyAt(mouseX, mouseY) : PM_NONE;
+        int y = menu.y() + MENU_PAD - presetMenuScroll;
+        for (int key : presetMenuRows()) {
+            int height = key == PM_SEP ? MENU_SEP_H : MENU_ROW_H;
+            if (key == PM_SEP) {
+                graphics.fill(menu.x() + 4, y + 1, menu.x() + menu.w() - 4, y + 2, HAIRLINE);
+            } else {
+                boolean hovered = inside && mouseY >= y && mouseY < y + height;
+                if (hovered) {
+                    roundedFill(graphics, menu.x() + 2, y, menu.w() - 4, height, 0x20FFFFFF);
+                }
+                // 预设行：左键应用、右键删除 —— 与候选行的"右键=卸下"同一族手势
+                graphics.drawString(this.font, truncate(presetMenuLabel(key, hoveredKey), menu.w() - 16),
+                        menu.x() + 8, y + 2, hovered ? TEXT : TEXT_DIM, false);
+            }
+            y += height;
+        }
+        graphics.disableScissor();
+        if (presetMenuScroll > 0) {
+            graphics.fill(menu.x() + 1, menu.y() + 1, menu.x() + menu.w() - 1, menu.y() + 3, 0x66000000);
+        }
+        if (presetMenuScroll < presetMenuMaxScroll()) {
+            graphics.fill(menu.x() + 1, menu.y() + menu.h() - 3,
+                    menu.x() + menu.w() - 1, menu.y() + menu.h() - 1, 0x66000000);
+        }
+    }
+
+    private String presetMenuLabel(int key, int hoveredKey) {
+        if (key >= 0 && key < presets.size()) {
+            return presets.get(key).name;
+        }
+        return switch (key) {
+            case PM_SAVE -> I18n.get("gui.z_tweaks.refit.preset.save");
+            case PM_IMPORT -> I18n.get("gui.z_tweaks.refit.preset.import");
+            // 导出对着"最近一份应用 / 保存的预设"：悬停行本身就是"导出"这一行，
+            // 用它当目标等于自指（想导出谁就得把指针从谁身上移开）。
+            case PM_EXPORT -> lastPresetName == null
+                    ? I18n.get("gui.z_tweaks.refit.preset.export_hint")
+                    : I18n.get("gui.z_tweaks.refit.preset.export", lastPresetName);
+            default -> "";
+        };
+    }
+
+    /** 命名输入框的矩形：弹层上方，与确认面板同一处。 */
+    private Rect presetNameRect() {
+        Rect menu = presetMenuRect();
+        int width = 160;
+        return new Rect(this.width / 2 - width / 2, menu.y() - 16, width, 12);
+    }
+
+    /** 确认 / 导入预览面板：把干跑结果摆出来，玩家点了才动手（issue #10 的决定）。 */
+    private Rect presetConfirmRect() {
+        int width = 250;
+        int height = MENU_PAD * 2 + presetConfirmLines().size() * 11 + MENU_ROW_H + 2;
+        return new Rect((this.width - width) / 2, Math.max(2, detailY() - 6 - height), width, height);
+    }
+
+    private List<String> presetConfirmLines() {
+        List<String> lines = new ArrayList<>();
+        if (pendingPlan != null) {
+            PresetPlan plan = pendingPlan;
+            lines.add(I18n.get("gui.z_tweaks.refit.preset.apply_title", plan.preset().name));
+            lines.add(I18n.get("gui.z_tweaks.refit.preset.apply_counts",
+                    String.valueOf(plan.installs().size()),
+                    String.valueOf(plan.unloads().size()),
+                    String.valueOf(plan.missing().size())));
+            for (int i = 0; i < Math.min(3, plan.missing().size()); i++) {
+                lines.add("· " + plan.missing().get(i));
+            }
+            if (!plan.enoughSpace()) {
+                lines.add(I18n.get("gui.z_tweaks.refit.preset.no_space"));
+            }
+        } else if (pendingImport != null) {
+            lines.add(I18n.get("gui.z_tweaks.refit.preset.import_title", pendingImport.name));
+            lines.add(I18n.get("gui.z_tweaks.refit.preset.import_counts",
+                    String.valueOf(pendingImport.attachments.size()), pendingImport.gun));
+        }
+        return lines;
+    }
+
+    /** 确认面板里鼠标落在哪一行（0 = 确认，1 = 取消，其它 = 没落在按钮上）。 */
+    private int presetConfirmKeyAt(double mouseX, double mouseY) {
+        Rect panel = presetConfirmRect();
+        if (!panel.contains(mouseX, mouseY)) {
+            return -1;
+        }
+        int rowTop = panel.y() + panel.h() - MENU_ROW_H - 2;
+        if (mouseY < rowTop) {
+            return -1;
+        }
+        return mouseX < panel.x() + panel.w() / 2 ? PC_OK : PC_CANCEL;
+    }
+
+    private void drawPresetConfirm(GuiGraphics graphics, int mouseX, int mouseY) {
+        Rect panel = presetConfirmRect();
+        roundedFill(graphics, panel.x(), panel.y(), panel.w(), panel.h(), 0xF0101010);
+        roundedBorder(graphics, panel.x(), panel.y(), panel.w(), panel.h(), 0x88FFFFFF);
+        List<String> lines = presetConfirmLines();
+        for (int i = 0; i < lines.size(); i++) {
+            graphics.drawString(this.font, truncate(lines.get(i), panel.w() - 14),
+                    panel.x() + 7, panel.y() + MENU_PAD + i * 11, i == 0 ? TEXT : TEXT_DIM, false);
+        }
+        Rect ok = new Rect(panel.x() + 4, panel.y() + panel.h() - MENU_ROW_H - 2,
+                panel.w() / 2 - 6, MENU_ROW_H);
+        Rect cancel = new Rect(panel.x() + panel.w() / 2 + 2, ok.y(), panel.w() / 2 - 6, MENU_ROW_H);
+        boolean okHover = !dragging && ok.contains(mouseX, mouseY);
+        boolean cancelHover = !dragging && cancel.contains(mouseX, mouseY);
+        button(graphics, this.font, ok, I18n.get("gui.z_tweaks.refit.preset.confirm"), okHover, true, true);
+        button(graphics, this.font, cancel, I18n.get("gui.z_tweaks.refit.preset.cancel"), cancelHover, false, true);
+    }
+
     private void drawSortButton(GuiGraphics graphics, int mouseX, int mouseY) {
         Rect rect = sortRect();
         boolean hovered = !dragging && rect.contains(mouseX, mouseY);
@@ -1521,6 +1759,31 @@ public class ZtRefitScreen extends GunRefitScreen {
         if (super.mouseClicked(mouseX, mouseY, button)) {
             return true;
         }
+        // 预设这一族画在其它一切之上，所以它们的命中判定排在最前（与绘制顺序相反）
+        if (pendingPlan != null || pendingImport != null) {
+            int row = presetConfirmKeyAt(mouseX, mouseY);
+            if (row >= 0) {
+                clickPresetConfirm(row);
+            }
+            // 点别处不收起：这是个需要玩家明确回答的询问
+            return true;
+        }
+        if (presetMenuOpen) {
+            if (presetMenuRect().contains(mouseX, mouseY)) {
+                int key = presetMenuKeyAt(mouseX, mouseY);
+                if (key != PM_NONE) {
+                    clickPresetMenu(key, button);
+                }
+                return true;
+            }
+            // 点别处 = 收起（顺带把没写完的名字放弃掉）
+            closePresetMenu();
+            return true;
+        }
+        if (presetRect().contains(mouseX, mouseY)) {
+            openPresetMenu();
+            return true;
+        }
         // 中键：复位相机，与 R 键走同一条路径（MC 的 button 从 0 起算，故中键是 2）
         if (button == 2) {
             OrbitCamera.reset();
@@ -1645,6 +1908,12 @@ public class ZtRefitScreen extends GunRefitScreen {
 
     @Override
     public boolean mouseScrolled(double mouseX, double mouseY, double delta) {
+        // 预设弹层同理：指针落在它上面就滚它自己
+        if (presetMenuOpen && presetMenuRect().contains(mouseX, mouseY)) {
+            presetMenuScroll = Mth.clamp(presetMenuScroll - (int) Math.signum(delta) * MENU_ROW_H,
+                    0, presetMenuMaxScroll());
+            return true;
+        }
         // 弹出层展开时，指针落在它上面就滚它自己（内容可能高过视口），不穿透给底下的列表
         if (sortMenuOpen && sortMenuRect().contains(mouseX, mouseY)) {
             sortMenuScroll = Mth.clamp(sortMenuScroll - (int) Math.signum(delta) * MENU_ROW_H,
@@ -1735,6 +2004,23 @@ public class ZtRefitScreen extends GunRefitScreen {
             showNativeBars = !showNativeBars;
             return true;
         }
+        // 名字输入框优先吃键：回车保存、ESC 放弃；此时别的快捷键（数字选槽、ENTER 安装）都要让路
+        if (namingPreset) {
+            if (keyCode == GLFW.GLFW_KEY_ENTER || keyCode == GLFW.GLFW_KEY_KP_ENTER) {
+                saveCurrentAsPreset();
+                return true;
+            }
+            if (keyCode == GLFW.GLFW_KEY_ESCAPE) {
+                stopNaming();
+                return true;
+            }
+            return super.keyPressed(keyCode, scanCode, modifiers);
+        }
+        // ESC 先关预设那一层，而不是直接关界面
+        if (presetMenuOpen && keyCode == GLFW.GLFW_KEY_ESCAPE) {
+            closePresetMenu();
+            return true;
+        }
         if (keyCode == GLFW.GLFW_KEY_V && ZtConfig.DEBUG_CAMERA_HOTKEY.get()) {
             OrbitCamera.toggle();
             return true;
@@ -1775,6 +2061,276 @@ public class ZtRefitScreen extends GunRefitScreen {
         // 服务端还是空槽，两边分叉。真正的"悬停虚拟装配"要克隆枪栈再驱动渲染管线（计划 §3.2），
         // 那属 M2；这里如实报错。
         notify(I18n.get("gui.z_tweaks.refit.msg.not_owned"));
+    }
+
+    // ---------------------------------------------------------------- 预设的逻辑（issue #10）
+
+    /** 干跑里的一条"要装上"：槽位类型 + 背包槽位。 */
+    private record PlanEntry(AttachmentType type, int invSlot) {
+    }
+
+    /** 干跑结果：这份预设在**当前**这把枪上会发生什么。 */
+    private record PresetPlan(PresetStore.Preset preset, List<PlanEntry> installs,
+                              List<AttachmentType> unloads, List<String> missing, boolean enoughSpace) {
+    }
+
+    private void openPresetMenu() {
+        presetMenuOpen = true;
+        presetMenuScroll = 0;
+        reloadPresets();
+    }
+
+    private void closePresetMenu() {
+        presetMenuOpen = false;
+        if (namingPreset) {
+            stopNaming();
+        }
+    }
+
+    private void reloadPresets() {
+        presets.clear();
+        ResourceLocation gunId = heldGunId();
+        if (gunId != null) {
+            presets.addAll(PresetStore.list(gunId));
+        }
+    }
+
+    private void clickPresetMenu(int key, int button) {
+        if (key >= 0 && key < presets.size()) {
+            PresetStore.Preset preset = presets.get(key);
+            if (button == 1) {
+                // 右键 = 删除，与候选行的"右键 = 卸下"同一族手势
+                ResourceLocation gunId = heldGunId();
+                if (gunId != null && PresetStore.delete(gunId, preset.name)) {
+                    notify(I18n.get("gui.z_tweaks.refit.msg.preset_deleted", preset.name));
+                    reloadPresets();
+                }
+                return;
+            }
+            pendingPlan = planOf(preset);
+            presetMenuOpen = false;
+            return;
+        }
+        switch (key) {
+            case PM_SAVE -> startNaming();
+            case PM_IMPORT -> importFromClipboard();
+            case PM_EXPORT -> exportLastPreset();
+            default -> {
+            }
+        }
+    }
+
+    private void clickPresetConfirm(int row) {
+        if (row == PC_CANCEL) {
+            pendingPlan = null;
+            pendingImport = null;
+            return;
+        }
+        if (pendingPlan != null) {
+            applyPlan(pendingPlan);
+        } else if (pendingImport != null) {
+            PresetStore.Preset preset = pendingImport;
+            pendingImport = null;
+            if (PresetStore.save(preset)) {
+                lastPresetName = preset.name;
+                notify(I18n.get("gui.z_tweaks.refit.msg.preset_imported", preset.name));
+                reloadPresets();
+            } else {
+                notify(I18n.get("gui.z_tweaks.refit.msg.preset_write_failed"));
+            }
+        }
+    }
+
+    /**
+     * 干跑：这份预设在当前这把枪上要装几件、卸几件、缺几件，以及背包空位够不够。
+     *
+     * <p>空位那一项不是洁癖：卸下来的件要放得进背包，服务端才肯卸
+     * （{@code ClientMessageUnloadAttachment} 里 {@code inventory.add} 失败就整体不动）。</p>
+     *
+     * <p>口径是"预设即全集"：预设没提到的槽位就是要空，所以那边会进卸下列表。</p>
+     */
+    private PresetPlan planOf(PresetStore.Preset preset) {
+        List<PlanEntry> installs = new ArrayList<>();
+        List<AttachmentType> unloads = new ArrayList<>();
+        List<String> missing = new ArrayList<>();
+        ItemStack gun = gunStack();
+        IGun iGun = IGun.getIGunOrNull(gun);
+        LocalPlayer player = getMinecraft().player;
+        if (iGun == null || player == null) {
+            return new PresetPlan(preset, installs, unloads, missing, true);
+        }
+        Inventory inventory = player.getInventory();
+        for (AttachmentType type : slotTypes()) {
+            String want = preset.attachments.get(type.name());
+            if (!iGun.allowAttachmentType(gun, type)) {
+                // 枪包在白名单之外又收紧了：那边的预设内容只能算缺件，也别去动它现在的槽
+                if (want != null) {
+                    missing.add(nameOfId(want));
+                }
+                continue;
+            }
+            ItemStack installed = iGun.getAttachment(gun, type);
+            String have = installed.isEmpty() ? null : String.valueOf(attachmentIdOf(installed));
+            if (want == null) {
+                if (have != null) {
+                    unloads.add(type);
+                }
+                continue;
+            }
+            if (want.equals(have)) {
+                continue;   // 已经是它了，不发多余的包
+            }
+            ResourceLocation id = ResourceLocation.tryParse(want);
+            int slot = id == null ? -1 : findInventorySlot(inventory, id);
+            if (slot < 0) {
+                missing.add(nameOfId(want));
+            } else {
+                installs.add(new PlanEntry(type, slot));
+            }
+        }
+        int free = 0;
+        for (int i = 0; i < inventory.getContainerSize(); i++) {
+            if (inventory.getItem(i).isEmpty()) {
+                free++;
+            }
+        }
+        return new PresetPlan(preset, installs, unloads, missing, free >= unloads.size());
+    }
+
+    /** 应用：先卸后装（先腾地方）。走的包与单件那条路完全一样，服务端照常校验。 */
+    private void applyPlan(PresetPlan plan) {
+        LocalPlayer player = getMinecraft().player;
+        if (player == null) {
+            return;
+        }
+        int gunSlot = player.getInventory().selected;
+        for (AttachmentType type : plan.unloads()) {
+            NetworkHandler.CHANNEL.sendToServer(new ClientMessageUnloadAttachment(gunSlot, type));
+        }
+        for (PlanEntry entry : plan.installs()) {
+            NetworkHandler.CHANNEL.sendToServer(
+                    new ClientMessageRefitGun(entry.invSlot(), gunSlot, entry.type()));
+        }
+        lastPresetName = plan.preset().name;
+        pendingPlan = null;
+        notify(I18n.get("gui.z_tweaks.refit.msg.preset_applied",
+                String.valueOf(plan.installs().size()), String.valueOf(plan.unloads().size())));
+    }
+
+    private void startNaming() {
+        namingPreset = true;
+        overwriteArmed = false;
+        presetName = I18n.get("gui.z_tweaks.refit.preset.default", String.valueOf(presets.size() + 1));
+        Rect rect = presetNameRect();
+        EditBox box = new EditBox(this.font, rect.x(), rect.y(), rect.w(), rect.h(),
+                Component.translatable("gui.z_tweaks.refit.preset.name_hint"));
+        box.setMaxLength(24);
+        box.setValue(presetName);
+        box.setResponder(value -> {
+            presetName = value;
+            // 名字改了，上一次"再按一次覆盖"的授权作废
+            overwriteArmed = false;
+        });
+        presetNameBox = box;
+        addRenderableWidget(box);
+        // 不给焦点的话，打字的键会被 Screen 分给槽位快捷键，框里一个字都进不去
+        setInitialFocus(box);
+    }
+
+    private void stopNaming() {
+        if (presetNameBox != null) {
+            removeWidget(presetNameBox);
+            presetNameBox = null;
+        }
+        namingPreset = false;
+    }
+
+    /** 保存当前这把枪的装配。同名先要一次二次确认（回车再来一次就覆盖）。 */
+    private void saveCurrentAsPreset() {
+        ResourceLocation gunId = heldGunId();
+        ItemStack gun = gunStack();
+        IGun iGun = IGun.getIGunOrNull(gun);
+        if (gunId == null || iGun == null) {
+            return;
+        }
+        String name = presetName.trim();
+        if (name.isEmpty()) {
+            notify(I18n.get("gui.z_tweaks.refit.msg.preset_no_name"));
+            return;
+        }
+        if (PresetStore.exists(gunId, name) && !overwriteArmed) {
+            overwriteArmed = true;
+            notify(I18n.get("gui.z_tweaks.refit.msg.preset_exists", name));
+            return;
+        }
+        PresetStore.Preset preset = new PresetStore.Preset();
+        preset.gun = gunId.toString();
+        preset.name = name;
+        for (AttachmentType type : slotTypes()) {
+            ItemStack installed = iGun.getAttachment(gun, type);
+            ResourceLocation id = installed.isEmpty() ? null : attachmentIdOf(installed);
+            if (id != null) {
+                preset.attachments.put(type.name(), id.toString());
+            }
+        }
+        if (preset.attachments.isEmpty()) {
+            notify(I18n.get("gui.z_tweaks.refit.msg.preset_empty"));
+            return;
+        }
+        if (!PresetStore.save(preset)) {
+            notify(I18n.get("gui.z_tweaks.refit.msg.preset_write_failed"));
+            return;
+        }
+        lastPresetName = name;
+        stopNaming();
+        reloadPresets();
+        notify(I18n.get("gui.z_tweaks.refit.msg.preset_saved", name));
+    }
+
+    /** 导出"最近一份应用 / 保存的"预设为分享码，放进剪贴板。 */
+    private void exportLastPreset() {
+        PresetStore.Preset target = null;
+        for (PresetStore.Preset preset : presets) {
+            if (preset.name.equals(lastPresetName)) {
+                target = preset;
+            }
+        }
+        if (target == null) {
+            notify(I18n.get("gui.z_tweaks.refit.msg.preset_export_none"));
+            return;
+        }
+        String code = PresetStore.encode(target);
+        if (code == null) {
+            notify(I18n.get("gui.z_tweaks.refit.msg.preset_write_failed"));
+            return;
+        }
+        getMinecraft().keyboardHandler.setClipboard(code);
+        notify(I18n.get("gui.z_tweaks.refit.msg.preset_copied", target.name));
+    }
+
+    /** 导入：读剪贴板 → 解析 → 校验枪 id → 摆出预览等确认（不直接落盘）。 */
+    private void importFromClipboard() {
+        PresetStore.Preset preset;
+        try {
+            preset = PresetStore.decode(getMinecraft().keyboardHandler.getClipboard());
+        } catch (IllegalArgumentException e) {
+            notify(I18n.get("gui.z_tweaks.refit.msg.preset_bad_code"));
+            return;
+        }
+        String held = String.valueOf(heldGunId());
+        if (!preset.gun.equals(held)) {
+            notify(I18n.get("gui.z_tweaks.refit.msg.preset_wrong_gun", preset.gun, held));
+            return;
+        }
+        pendingImport = preset;
+        presetMenuOpen = false;
+    }
+
+    /** 配件 id → 显示名（缺件清单里用）。认不出来的就照原样显示 id。 */
+    private static String nameOfId(String id) {
+        return TimelessAPI.getClientAttachmentIndex(ResourceLocation.tryParse(id))
+                .map(index -> Component.translatable(index.getName()).getString())
+                .orElse(id);
     }
 
     /** 卸下当前选中槽位的配件（详情条的"卸下"按钮与 U 键）。 */
