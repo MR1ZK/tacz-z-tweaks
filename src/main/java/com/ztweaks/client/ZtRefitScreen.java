@@ -165,6 +165,8 @@ public class ZtRefitScreen extends GunRefitScreen {
     private boolean onlyImproving = false;
     /** 排序 / 筛选弹出层是否展开。它是底部那一行唯一的排序入口。 */
     private boolean sortMenuOpen = false;
+    /** 弹出层内容的滚动偏移（像素）。只有内容高过视口时才有意义，见 {@link #sortMenuRect()}。 */
+    private int sortMenuScroll = 0;
 
     /** 上一次点击候选条目的时间戳 / 下标 / 鼠标键，用于双击判定。 */
     private long lastRowClickTime = 0L;
@@ -207,6 +209,7 @@ public class ZtRefitScreen extends GunRefitScreen {
         // 弹出层跟着关：init() 会被切槽位与服务端刷新（装/卸完成后）触发，
         // 此时底下的列表已经换了一批，留着旧菜单容易点到不存在的内容。
         this.sortMenuOpen = false;
+        this.sortMenuScroll = 0;
         this.hoveredRow = -1;
         this.lastRowClickTime = 0L;
         this.lastRowClickIndex = -1;
@@ -363,32 +366,54 @@ public class ZtRefitScreen extends GunRefitScreen {
         return selectedStat() != null;
     }
 
+    /** 弹出层内容的总高度（十四行 + 两个分隔条 + 上下内边距），不受视口限制。 */
+    private static int sortMenuContentHeight() {
+        int height = MENU_PAD * 2;
+        for (int key : SORT_MENU_ROWS) {
+            height += key == MENU_SEP ? MENU_SEP_H : MENU_ROW_H;
+        }
+        return height;
+    }
+
     /**
-     * 弹出层矩形：右对齐贴在排序按钮上方，向上展开。
+     * 弹出层矩形：右对齐贴在排序按钮上方、向上展开，并**夹进候选面板与窗口之内**。
+     *
+     * <p>两个约束都不是可选的：面板高度是 {@code GUI 高 − 134}，而弹层内容有
+     * {@code 170px}，所以在 GUI 高度不足 320（例如 1080p 下 GUI scale 4 = 480×270）时，
+     * 按内容高度直接向上展开会把顶部十几像素顶到屏幕外，最上面两行（名称 / 模组）直接看不见。
+     * 这里改成"最多长到可用高度"，剩下的靠 {@link #sortMenuScroll} 滚——见 {@link #drawSortMenu}。</p>
      *
      * <p>往候选面板内侧长，是因为底部那一行已经塞满（搜索框 120 + 间隙 4 + 排序按钮 58 = 182，
      * 而面板内宽只有 182），既没地方放第二个按钮，也不该为它加宽面板。</p>
      */
     private Rect sortMenuRect() {
-        int height = MENU_PAD * 2;
-        for (int key : SORT_MENU_ROWS) {
-            height += key == MENU_SEP ? MENU_SEP_H : MENU_ROW_H;
-        }
+        Rect list = listRect();
+        int top = Math.max(2, list.y() + LIST_HEADER);
+        int bottom = footerY(list) - 2;
+        int height = Math.max(MENU_ROW_H * 2 + MENU_PAD * 2,
+                Math.min(sortMenuContentHeight(), bottom - top));
         Rect sort = sortRect();
-        return new Rect(sort.x() + sort.w() - MENU_W, footerY(listRect()) - height - 2, MENU_W, height);
+        int x = Math.min(sort.x() + sort.w() - MENU_W, this.width - MENU_W - 2);
+        return new Rect(Math.max(2, x), Math.max(2, bottom - height), MENU_W, height);
     }
 
-    /** 弹出层里 y 坐标落在哪一行；落在内边距或分隔条上返回 {@link #MENU_NONE} / {@link #MENU_SEP}。 */
+    /** 内容高过视口时最多能滚多少像素。 */
+    private int sortMenuMaxScroll() {
+        return Math.max(0, sortMenuContentHeight() - sortMenuRect().h());
+    }
+
+    /** 弹出层里鼠标落在哪一行（已算上滚动偏移）；落在内边距或分隔条上返回 {@link #MENU_NONE}。 */
     private int sortMenuKeyAt(double mouseX, double mouseY) {
         Rect menu = sortMenuRect();
         if (!menu.contains(mouseX, mouseY)) {
             return MENU_NONE;
         }
-        int y = menu.y() + MENU_PAD;
+        int contentY = (int) (mouseY - menu.y()) + sortMenuScroll;
+        int y = MENU_PAD;
         for (int key : SORT_MENU_ROWS) {
             int height = key == MENU_SEP ? MENU_SEP_H : MENU_ROW_H;
-            if (mouseY < y + height) {
-                return key;
+            if (contentY >= y && contentY < y + height) {
+                return key == MENU_SEP ? MENU_NONE : key;
             }
             y += height;
         }
@@ -570,13 +595,16 @@ public class ZtRefitScreen extends GunRefitScreen {
             byField = Comparator.comparing((Candidate c) -> c.modId().toLowerCase(Locale.ROOT))
                     .thenComparing(c -> c.name().toLowerCase(Locale.ROOT));
         } else {
-            // 参数排序：improvement 已经是"越大越好"（见 StatCatalog），所以方向开关对参数项
-            // 也是同向的"优→劣 / 劣→优"，不需要再按 positivelyBetter 分情况。
+            // 参数排序：improvement 已经是"越大越好"（见 StatCatalog），所以"优→劣"要的是**降序**——
+            // 与名称/模组的 A-Z（升序）恰好相反，方向开关的语义在两种排序下不一样，见下面。
             // 同分按名字兜底：否则连续两帧重建（切槽位、改搜索）可能给出不同顺序，看着像抖动。
             byField = Comparator.comparingDouble((Candidate c) -> c.improvement())
                     .thenComparing(c -> c.name().toLowerCase(Locale.ROOT));
         }
-        if (!sortBestFirst) {
+        // 方向开关的两种含义：名称/模组下 sortBestFirst = A-Z（升序），
+        // 参数项下 sortBestFirst = 优→劣（降序）。不区分的话，按后坐力排序会变成"最差的在最前"。
+        boolean ascending = sortKey == SORT_NAME || sortKey == SORT_MOD ? sortBestFirst : !sortBestFirst;
+        if (!ascending) {
             byField = byField.reversed();
         }
         return Comparator.comparingInt((Candidate c) -> c.invSlot() >= 0 ? 0 : 1).thenComparing(byField);
@@ -1092,10 +1120,13 @@ public class ZtRefitScreen extends GunRefitScreen {
      */
     private void drawSortMenu(GuiGraphics graphics, int mouseX, int mouseY) {
         Rect menu = sortMenuRect();
+        sortMenuScroll = Mth.clamp(sortMenuScroll, 0, sortMenuMaxScroll());
         roundedFill(graphics, menu.x(), menu.y(), menu.w(), menu.h(), 0xF0101010);
         roundedBorder(graphics, menu.x(), menu.y(), menu.w(), menu.h(), 0x88FFFFFF);
+        // 内容可能高过视口（见 sortMenuRect），超出部分一律裁掉，而不是画到面板外面去
+        graphics.enableScissor(menu.x() + 1, menu.y() + 1, menu.x() + menu.w() - 1, menu.y() + menu.h() - 1);
         boolean inside = menu.contains(mouseX, mouseY);
-        int y = menu.y() + MENU_PAD;
+        int y = menu.y() + MENU_PAD - sortMenuScroll;
         for (int key : SORT_MENU_ROWS) {
             int height = key == MENU_SEP ? MENU_SEP_H : MENU_ROW_H;
             if (key == MENU_SEP) {
@@ -1116,6 +1147,14 @@ public class ZtRefitScreen extends GunRefitScreen {
                 }
             }
             y += height;
+        }
+        graphics.disableScissor();
+        // 上/下沿还有没露出来的行时压一条暗条当提示。刻意不用箭头字形——不押注默认字体里有没有那个码位。
+        if (sortMenuScroll > 0) {
+            graphics.fill(menu.x() + 1, menu.y() + 1, menu.x() + menu.w() - 1, menu.y() + 3, 0x66000000);
+        }
+        if (sortMenuScroll < sortMenuMaxScroll()) {
+            graphics.fill(menu.x() + 1, menu.y() + menu.h() - 3, menu.x() + menu.w() - 1, menu.y() + menu.h() - 1, 0x66000000);
         }
     }
 
@@ -1323,12 +1362,14 @@ public class ZtRefitScreen extends GunRefitScreen {
         // 排序 / 筛选弹出层：它盖在候选列表之上，所以判定必须排在列表行之前 —— 否则点弹出层里
         // 的一行会顺带把底下那行的配件选中、甚至触发双击装上。
         if (sortMenuOpen) {
-            if (candidateListVisible()) {
+            if (candidateListVisible() && sortMenuRect().contains(mouseX, mouseY)) {
+                // 落在分隔条或内边距上也算"点在弹层里"：吃掉这一下，但既不做事也不收起 ——
+                // 否则想点某一行、手抖偏到分隔条上就把整个弹层关了。
                 int key = sortMenuKeyAt(mouseX, mouseY);
-                if (key != MENU_NONE && key != MENU_SEP) {
+                if (key != MENU_NONE) {
                     clickSortMenu(key);
-                    return true;
                 }
+                return true;
             }
             // 点别处 = 收起。这一下照样吃掉：不穿透给下面的列表，避免"想关菜单却装了个配件"。
             sortMenuOpen = false;
@@ -1365,6 +1406,7 @@ public class ZtRefitScreen extends GunRefitScreen {
         // 点它只负责开合弹出层 —— 排序键、方向、筛选全在那层里选，按钮不再循环切换。
         if (candidateListVisible() && sortRect().contains(mouseX, mouseY)) {
             sortMenuOpen = !sortMenuOpen;
+            sortMenuScroll = 0;   // 每次展开都从顶上开始，不记住上次滚到哪
             return true;
         }
         // 详情条按钮
@@ -1423,8 +1465,10 @@ public class ZtRefitScreen extends GunRefitScreen {
 
     @Override
     public boolean mouseScrolled(double mouseX, double mouseY, double delta) {
-        // 弹出层展开时，指针落在它上面就吃掉滚轮：底下列表跟着滚，会让人分不清自己在滚哪一层
+        // 弹出层展开时，指针落在它上面就滚它自己（内容可能高过视口），不穿透给底下的列表
         if (sortMenuOpen && sortMenuRect().contains(mouseX, mouseY)) {
+            sortMenuScroll = Mth.clamp(sortMenuScroll - (int) Math.signum(delta) * MENU_ROW_H,
+                    0, sortMenuMaxScroll());
             return true;
         }
         // 指针在候选面板内（但不在底部搜索框 / 排序按钮上）才翻列表，其余位置一律给相机缩放
