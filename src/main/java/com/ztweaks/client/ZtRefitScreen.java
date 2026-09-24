@@ -1548,8 +1548,8 @@ public class ZtRefitScreen extends GunRefitScreen {
      * （手部渲染在 GUI 之前，故有 1 帧延迟，肉眼无感）。
      *
      * <p>刻意只驱动 3D 预览、<b>不动 {@code selected}</b>：否则鼠标从列表划向安装按钮的途中
-     * 会把待安装目标一并改掉，容易装错件。详情条仍跟随 {@code selected}，
-     * "悬停实时 diff" 归 §3.2-4（M4）。</p>
+     * 会把待安装目标一并改掉，容易装错件。详情条是另一条线：它由 {@link #previewCandidate()}
+     * 驱动（悬停优先、移出回到 {@code selected}），见 {@link #refreshPreview()}。</p>
      */
     private void syncPreview() {
         AttachmentType type = RefitTransform.getCurrentTransformType();
