@@ -86,11 +86,13 @@ tacz_refit_plus/                    （新仓库，GPL-3.0）
 
 ### 3.1 扩展元数据（ExtendedAttachmentMeta）
 
-> ⚠️ **本节已废（v1）。** 这里设想的"附属自有扩展元数据 + 服务端 `MetaLoader` + 网络同步"整层被 [ADR-0001](adr/0001-client-only-no-custom-data.md) 推翻：v1 不要自定义数据、不要网络通道、不要求服务端安装。
+> ⚠️ **整节不采纳（不只是"v1 不做"）。** 这里设想的"附属自有扩展元数据 + 服务端 `MetaLoader` + 网络同步"被 [ADR-0001](adr/0001-client-only-no-custom-data.md) 推翻（v1 不要自定义数据、不要网络通道、不要求服务端安装），而它描述的**字段本身后来也一并否掉了**：配件怎么分类、怎么介绍是**枪包作者的领域**，本模组不替作者定义内容，也不另立一套平行体系。所以 v1.1 也不做，这不是排期问题。
 >
-> 但**它描述的字段本身仍然成立**（folder / 手写优缺点 / 单位覆盖 / 背景资料），只是"这些数据从哪来"要重定，归票 [v1.1 的配件元数据从哪来](https://github.com/MR1ZK/tacz-z-tweaks/issues/3)。
+> 落地口径：分类只用 `AttachmentType`（六个槽位，TACZ 本来就这么分组），文案交作者（描述沿用 TACZ 原生 tooltip key）。决策与理由见 issue #3 的解决评论。
 >
-> 另外，本节末尾那句"分类也可直接复用 TACZ 标签体系"**已被证否**：`tacz_tags/attachments` 那 103 个 json 是兼容关系索引，命名无层级、不可枚举、覆盖不完整，当不了分类——见 `research/tacz-attachment-tags.md`。
+> **连带作废的下游提法**（本文其他地方还会出现，一律以此为准）：§3.3-4 的"文件夹浏览"、§3.3-5 的"记住上次浏览的文件夹"、§3.4 里的 `stat_overrides` 单位覆盖、§3.5 布局图里的文件夹按钮与"背景"标签页（Trivia）、§4 的 `ServerMessageSyncMeta`、以及架构图里的 `ExtendedAttachmentMeta` / `MetaLoader`。
+>
+> 另外，本节末尾那句"分类也可直接复用 TACZ 标签体系"**也已被证否**：`tacz_tags/attachments` 那 103 个 json 是兼容关系索引，命名无层级、不可枚举、覆盖不完整，当不了分类——见 `research/tacz-attachment-tags.md`。
 
 为每个配件 id 提供附属侧的补充数据，与 TACZ 的 `AttachmentIndex` 运行时合并：
 
@@ -246,7 +248,7 @@ dependencies {
 
 ## 7. 里程碑
 
-> **实际进度（截至 2026-09-24）**：M0 / M1 / M2 完成；M3 部分完成（只列能装的 + 搜索 + 可用置顶 + 按参数排序筛选已做，不可安装分组与原因角标、收藏、位置记忆、一键拆空未做）；M4 只落了 Pros/Cons 双栏（元数据、悬停实时 diff、整枪对比面板、Trivia 未做）；M5 未开始。
+> **实际进度（截至 2026-09-25）**：M0 / M1 / M2 完成；M3 部分完成（只列能装的 + 搜索 + 可用置顶 + 按参数排序筛选已做；不可安装分组与原因角标、收藏、滚动位置记忆、一键拆空未做）；M4 只落了 Pros/Cons 双栏（**"扩展元数据 + 同步"与 Trivia 页已整节不采纳**，见 §3.1；悬停实时 diff、整枪对比面板未做）；M5 未开始。
 >
 > 下表是规划期的估计，**已经不按它走了** —— 各功能的归属、取舍与顺序以[路线图](https://github.com/MR1ZK/tacz-z-tweaks/issues/1)为准。
 
