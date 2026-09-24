@@ -32,6 +32,8 @@
   "gui.z_tweaks.refit.candidates.title": "候选配件",
   "gui.z_tweaks.refit.candidates.empty": "这个槽位没有可用配件",
   "gui.z_tweaks.refit.candidates.no_match": "没有匹配的配件",
+  "gui.z_tweaks.refit.blocked.this": "装不上这个配件",
+  "gui.z_tweaks.refit.blocked.slot": "这里装不了配件",
   "gui.z_tweaks.refit.search.hint": "搜索…",
   "gui.z_tweaks.refit.sort.name.asc": "名称 A-Z",
   "gui.z_tweaks.refit.sort.name.desc": "名称 Z-A",

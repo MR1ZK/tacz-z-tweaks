@@ -43,6 +43,11 @@ public final class ZtUi {
     /** Pros/Cons 沿用 TACZ 的红绿语义，只是降低一点饱和度避免刺眼。 */
     public static final int GOOD = 0xFF5FD96A;
     public static final int BAD = 0xFFFF6E6E;
+    /**
+     * 不可安装（{@code Compat} 非 OK）的角标与提示文字：与"不支持的槽位"同一族的红褐，
+     * 一眼是"这里不行"，而不是"次要信息"。
+     */
+    public static final int BLOCKED = 0xFF8A5A5A;
     /** 悬停行叠加与不可用底色。 */
     public static final int HOVER_OVERLAY = 0x22FFFFFF;
     public static final int TRACK_BG = 0x33FFFFFF;

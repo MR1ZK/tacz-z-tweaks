@@ -24,6 +24,7 @@ import com.tacz.guns.network.message.ClientMessageRefitGun;
 import com.tacz.guns.network.message.ClientMessageUnloadAttachment;
 import com.tacz.guns.resource.modifier.AttachmentCacheProperty;
 import com.tacz.guns.resource.modifier.AttachmentPropertyManager;
+import com.tacz.guns.resource.CommonAssetsManager;
 import com.tacz.guns.resource.index.CommonAttachmentIndex;
 import com.tacz.guns.resource.index.CommonGunIndex;
 import com.tacz.guns.resource.pojo.data.attachment.AttachmentData;
@@ -57,6 +58,7 @@ import java.util.List;
 import java.util.Locale;
 import java.util.Map;
 import java.util.Objects;
+import java.util.Set;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 
@@ -505,11 +507,17 @@ public class ZtRefitScreen extends GunRefitScreen {
     }
 
     /**
-     * 候选配件：只保留能装到手里的枪上的（{@code iGun.allowAttachment}）。
+     * 候选配件：分两组装进同一个列表，靠 {@link Candidate#compat()} 与排序器分组（见 ADR 与
+     * issue #6 的解决评论）。
      *
-     * <p>是否要求"带在身上"按游戏模式分：生存模式只列背包里有的 —— 装配件要把背包
-     * 槽位发给服务端，没带在身上的点了也装不上；创造模式列全部，没带在身上的在列表里
-     * 把图标标灰（能预览、装不上）。TACZ 原生两种模式都只扫背包，创造分支是我们加的。</p>
+     * <p>第一组是**能装**的（{@code iGun.allowAttachment} 通过）：生存模式只列背包里有的 ——
+     * 装配件要把背包槽位发给服务端，没带在身上的点了也装不上；创造模式列全部，没带在身上的
+     * 在列表里把图标标灰（能预览、装不上）。TACZ 原生两种模式都只扫背包，创造分支是我们加的。</p>
+     *
+     * <p>第二组是**不可安装**、但玩家确实拥有的：置底、灰显、带角标。只在"玩家握着它"时出现
+     * —— 创造模式下列出全部不可安装的配件是纯噪音（数量还是"能装"那批的好几倍），而且没有
+     * "我手里这件为什么装不上"这个困惑需要解释。这一组不参与"只看改善的"筛选：它们不是候选，
+     * 是解释。</p>
      */
     private void rebuildCandidates() {
         LocalPlayer player = getMinecraft().player;
@@ -528,6 +536,8 @@ public class ZtRefitScreen extends GunRefitScreen {
             return;
         }
         cachedType = type;
+        // 枪压根没声明白名单时，整批配件都是这一档（角标「这里装不了配件」）。
+        boolean noWhitelist = whitelistEmpty(iGun.getGunId(gun));
         // 参数排序 / 筛选才需要逐候选跑一次属性求值。名称/模组排序下这一整段都不执行，
         // 一分钱不花。
         StatCatalog.StatDef stat = selectedStat();
@@ -551,25 +561,33 @@ public class ZtRefitScreen extends GunRefitScreen {
                 continue;
             }
             ItemStack stack = AttachmentItemBuilder.create().setId(entry.getKey()).build();
-            if (!iGun.allowAttachment(gun, stack)) {
-                continue;
-            }
+            Compat compat = iGun.allowAttachment(gun, stack)
+                    ? Compat.OK
+                    : (noWhitelist ? Compat.NO_WHITELIST : Compat.NOT_LISTED);
             if (!searchQuery.isBlank() && !matchesQuery(nameOf(stack))) {
                 continue;
             }
             int invSlot = findInventorySlot(inventory, entry.getKey());
-            // 生存模式只列真正带在身上的：装配件要把背包槽位发给服务端，没带在身上的
-            // 点了也装不上。创造模式列全部，没带在身上的在列表里标灰（能预览、装不上）。
-            if (invSlot < 0 && !player.isCreative()) {
+            if (compat == Compat.OK) {
+                // 生存模式只列真正带在身上的：装配件要把背包槽位发给服务端，没带在身上的
+                // 点了也装不上。创造模式列全部，没带在身上的在列表里标灰（能预览、装不上）。
+                if (invSlot < 0 && !player.isCreative()) {
+                    continue;
+                }
+            } else if (invSlot < 0) {
+                // 不可安装那组只在"玩家真有"时出现，创造模式的"全都看得见"不适用于它。
                 continue;
             }
-            double improvement = stat == null ? 0 : measureImprovement(stat, gun, iGun, gunData, base, stack);
+            // 改善量只对能装的算：不可安装的组合不存在，"装上之后"是一组没有意义的数。
+            double improvement = compat != Compat.OK || stat == null
+                    ? 0 : measureImprovement(stat, gun, iGun, gunData, base, stack);
             // 筛选：只看比"现在装着的"更好的。刻意不区分是否拥有 —— 拥有性是生存/创造规则的
             // 职责（上面那一行已经在管），在这里再滤一次只会让创造模式下的列表行为变得难以解释。
-            if (stat != null && onlyImproving && improvement <= 0) {
+            if (compat == Compat.OK && stat != null && onlyImproving && improvement <= 0) {
                 continue;
             }
-            found.add(new Candidate(stack, invSlot, nameOf(stack), entry.getKey().getNamespace(), improvement));
+            found.add(new Candidate(stack, invSlot, compat, nameOf(stack),
+                    entry.getKey().getNamespace(), improvement));
         }
         found.sort(candidateComparator());
         candidates.clear();
@@ -577,6 +595,23 @@ public class ZtRefitScreen extends GunRefitScreen {
         selected = 0;
         scroll = 0;
         samplesDirty = true;
+    }
+
+    /**
+     * 枪的 {@code allow_attachment_tags} 是不是空的。TACZ 自己的注释写着"为空说明目前没有任何
+     * 可以装的配件"（{@code AllowAttachmentTagMatcher.match0}），所以这就是「这里装不了配件」
+     * 那一档的判据 —— 与它给出的兼容判定同源，两句说辞不会打架。
+     *
+     * <p>代价：又多了一个 TACZ 内部类的接触点。这条记在 issue #13 的盘点上，属于"收不掉、
+     * 只能集中 + 告警"的那一类。</p>
+     */
+    private static boolean whitelistEmpty(@Nullable ResourceLocation gunId) {
+        if (gunId == null) {
+            // 枪 id 都拿不到（理论上不该发生）：退回"白名单非空"，说得保守一点。
+            return false;
+        }
+        Set<String> tags = CommonAssetsManager.get().getAllowAttachmentTags(gunId);
+        return tags == null || tags.isEmpty();
     }
 
     /**
@@ -607,7 +642,19 @@ public class ZtRefitScreen extends GunRefitScreen {
         if (!ascending) {
             byField = byField.reversed();
         }
-        return Comparator.comparingInt((Candidate c) -> c.invSlot() >= 0 ? 0 : 1).thenComparing(byField);
+        Comparator<Candidate> usable = Comparator.comparingInt((Candidate c) -> c.invSlot() >= 0 ? 0 : 1)
+                .thenComparing(byField);
+        // 不可安装的那一组固定按名字排：它们不参与"按参数""方向"这些候选语义 —— 那是"选哪个装"
+        // 的问题，而它们装不上。放在列表里只为解释"手里这件为什么装不上"（见 issue #6）。
+        Comparator<Candidate> blocked = Comparator.comparing(c -> c.name().toLowerCase(Locale.ROOT));
+        return (a, b) -> {
+            boolean okA = a.compat() == Compat.OK;
+            boolean okB = b.compat() == Compat.OK;
+            if (okA != okB) {
+                return okA ? -1 : 1;
+            }
+            return okA ? usable.compare(a, b) : blocked.compare(a, b);
+        };
     }
 
     /**
@@ -684,6 +731,10 @@ public class ZtRefitScreen extends GunRefitScreen {
         cons.clear();
         neutral.clear();
         if (candidates.isEmpty()) {
+            return;
+        }
+        if (selectedCompat() != Compat.OK) {
+            // 不可安装的件不给 Pros/Cons 与参数：那是"装上之后"的账，而这个组合不存在。
             return;
         }
         if (ZtConfig.PROS_CONS_MODE.get() == ZtConfig.ProsConsMode.TACZ_TEXT) {
@@ -1015,6 +1066,16 @@ public class ZtRefitScreen extends GunRefitScreen {
         roundedFill(graphics, badgeX, y + 2, badgeW, 10, 0x40000000);
         roundedBorder(graphics, badgeX, y + 2, badgeW, 10, HAIRLINE);
         graphics.drawCenteredString(this.font, count, badgeX + badgeW / 2, y + 3, TEXT_DIM);
+        // 「这里装不了配件」是整个槽位的事：逐行贴同一句话是成片的重复，标题行说一次。
+        // 太挤就不画（英文标题更长），行内角标还在，信息不丢。
+        if (hasNoWhitelistRows()) {
+            String note = I18n.get("gui.z_tweaks.refit.blocked.slot");
+            int noteX = badgeX - 5 - this.font.width(note);
+            int titleRight = x + 6 + this.font.width(I18n.get("gui.z_tweaks.refit.candidates.title"));
+            if (noteX > titleRight + 4) {
+                graphics.drawString(this.font, note, noteX, y + 4, BLOCKED, false);
+            }
+        }
         graphics.fill(x + 4, y + LIST_HEADER - 3, right - 4, y + LIST_HEADER - 2, HAIRLINE);
 
         int rows = visibleRows();
@@ -1024,15 +1085,23 @@ public class ZtRefitScreen extends GunRefitScreen {
         int listTop = y + LIST_HEADER;
 
         if (candidates.isEmpty()) {
-            // 空列表有两种成因，不能混用一句：槽位本来就没配件 vs 被搜索词筛没了
-            String key = searchQuery.isBlank()
-                    ? "gui.z_tweaks.refit.candidates.empty"
-                    : "gui.z_tweaks.refit.candidates.no_match";
+            // 空列表有三种成因，不能混用一句：被搜索词筛没了 / 枪包压根没声明白名单 /
+            // 白名单里有、但你现在手上没有能装的。第二句与行内角标用同一串字 ——
+            // 同一个成因，同一个说法。
+            String key;
+            if (!searchQuery.isBlank()) {
+                key = "gui.z_tweaks.refit.candidates.no_match";
+            } else if (whitelistEmpty(heldGunId())) {
+                key = "gui.z_tweaks.refit.blocked.slot";
+            } else {
+                key = "gui.z_tweaks.refit.candidates.empty";
+            }
             graphics.drawString(this.font, I18n.get(key), x + 6, listTop + 4, TEXT_MUTED, false);
         }
 
         // 裁剪：滚动/悬停的行不会越出面板边线
         graphics.enableScissor(x + 1, listTop, right - 1, listTop + rows * ROW_H);
+        int firstBlocked = firstBlockedIndex();
         for (int i = 0; i < rows && scroll + i < candidates.size(); i++) {
             int index = scroll + i;
             Rect row = rowRect(list, i);
@@ -1041,8 +1110,15 @@ public class ZtRefitScreen extends GunRefitScreen {
             if (hovered) {
                 hoveredRow = index;
             }
-            boolean owned = candidates.get(index).invSlot() >= 0;
+            Candidate entry = candidates.get(index);
+            boolean owned = entry.invSlot() >= 0;
+            String badge = blockedKey(entry.compat());
 
+            if (index == firstBlocked) {
+                // 不可安装那批的上面压一条线把它隔开：不折叠、不分组，一条线就够了。
+                // 画在行间那 2px 的缝里，不额外吃一行高度。
+                graphics.fill(row.x(), row.y() - 2, row.x() + row.w(), row.y() - 1, 0x66FFFFFF);
+            }
             if (isSelected) {
                 roundedFill(graphics, row.x(), row.y(), row.w(), row.h(), ACCENT_SOFT);
             } else if (hovered) {
@@ -1053,17 +1129,24 @@ public class ZtRefitScreen extends GunRefitScreen {
                 graphics.fill(row.x(), row.y() + 1, row.x() + 2, row.y() + row.h() - 1,
                         isSelected ? ACCENT : 0x88FFFFFF);
             }
-            graphics.renderItem(candidates.get(index).stack(), row.x() + 5, row.y() + 1);
-            if (!owned) {
-                // 图标盖一层半透明黑：虚拟装配能预览它，但点下去服务端装不上（见
-                // installSelected），不标出来会让"能预览"被误读成"能装"。
-                // 只在创造模式看得到 —— 生存模式压根不列没带在身上的。
+            graphics.renderItem(entry.stack(), row.x() + 5, row.y() + 1);
+            if (!owned || badge != null) {
+                // 图标盖一层半透明黑：这两种行都点不动 —— 没带在身上的（服务端取不到件）
+                // 与不可安装的（服务端两份包都会拒）。不标出来会让"能预览"被误读成"能装"。
+                // 前者只在创造模式看得到，后者只在玩家真握着它时出现。
                 graphics.fill(row.x() + 5, row.y() + 1, row.x() + 21, row.y() + 17, 0x80000000);
             }
             // 名字在 rebuildCandidates 里已经算好存在 Candidate 上，这里直接用，不再逐帧查索引
-            String name = candidates.get(index).name();
-            graphics.drawString(this.font, this.font.plainSubstrByWidth(name, row.w() - 34),
-                    row.x() + 24, row.y() + 5, owned ? TEXT : TEXT_MUTED, false);
+            String name = entry.name();
+            int badgeWidth = badge == null ? 0 : this.font.width(badge) + 5;
+            graphics.drawString(this.font, this.font.plainSubstrByWidth(name, row.w() - 34 - badgeWidth),
+                    row.x() + 24, row.y() + 5, owned && badge == null ? TEXT : TEXT_MUTED, false);
+            if (badge != null) {
+                // 角标必须是文字：列表里已经有另一种灰（没带在身上的），光靠颜色分不开这两种"点不动"。
+                // 名字按剩余宽度截断即可 —— 悬停有完整名字的 tooltip，不为角标加宽面板。
+                graphics.drawString(this.font, badge, row.x() + row.w() - 3 - this.font.width(badge),
+                        row.y() + 5, BLOCKED, false);
+            }
             if (hovered) {
                 tooltip(Component.literal(name), (int) mouseX, (int) mouseY);
             }
@@ -1168,7 +1251,10 @@ public class ZtRefitScreen extends GunRefitScreen {
      */
     private void syncPreview() {
         AttachmentType type = RefitTransform.getCurrentTransformType();
-        if (hoveredRow < 0 || hoveredRow >= candidates.size() || type == AttachmentType.NONE) {
+        // 不可安装的件不虚拟装配：3D 讲的是"装上之后那把枪"，而那个组合不可能存在
+        // （与 #9 拒绝"一把不存在的枪配一组真实的数"同一条理由）。
+        if (hoveredRow < 0 || hoveredRow >= candidates.size() || type == AttachmentType.NONE
+                || candidates.get(hoveredRow).compat() != Compat.OK) {
             VirtualAssembly.clear();
             return;
         }
@@ -1206,7 +1292,9 @@ public class ZtRefitScreen extends GunRefitScreen {
 
         Rect installRect = installRect();
         Rect unloadRect = unloadRect();
-        boolean installEnabled = selectedOwned();
+        // 能装 = 拥有 + 兼容。只看"拥有"会让不可安装的行亮着按钮，点下去服务端两份包都静默拒绝，
+        // 而客户端已经放过安装音效、弹过「已安装」—— 界面说装上了，枪上其实什么都没有。
+        boolean installEnabled = selectedOwned() && selectedCompat() == Compat.OK;
         // 概览态不画这两个按钮：没有选中槽位，它们永远处于禁用态，
         // 只会占着参数卡右下的空间。安装/卸载的提示也只跟按钮走。
         if (RefitTransform.getCurrentTransformType() != AttachmentType.NONE) {
@@ -1217,7 +1305,10 @@ public class ZtRefitScreen extends GunRefitScreen {
                     unloadRect.contains(mouseX, mouseY) && !dragging, false, unloadEnabled);
             // 不可用时把原因说清楚：悬停给提示，而不是点了没反应
             if (!dragging && installRect.contains(mouseX, mouseY) && !installEnabled) {
-                tooltip(Component.literal(I18n.get("gui.z_tweaks.refit.msg.not_owned")),
+                // 禁用原因分两种：不可安装说"为什么装不上"，没带在身上说"缺件"
+                String blocked = blockedKey(selectedCompat());
+                tooltip(Component.literal(
+                                I18n.get(blocked != null ? blocked : "gui.z_tweaks.refit.msg.not_owned")),
                         (int) mouseX, (int) mouseY);
             }
             if (!dragging && unloadRect.contains(mouseX, mouseY) && !unloadEnabled) {
@@ -1238,12 +1329,32 @@ public class ZtRefitScreen extends GunRefitScreen {
         }
     }
 
+    /** 当前选中的候选；列表为空时给 null。选中下标越界时钳到最后一项（与各处绘制一致）。 */
+    @Nullable
+    private Candidate selectedCandidate() {
+        return candidates.isEmpty() ? null : candidates.get(Math.min(selected, candidates.size() - 1));
+    }
+
+    /** 当前选中候选的兼容档；没有选中项时当作"能装"，让不做额外拦截的调用点保持原行为。 */
+    private Compat selectedCompat() {
+        Candidate c = selectedCandidate();
+        return c == null ? Compat.OK : c.compat();
+    }
+
+    /** 不可安装的角标 / 提示文案 key；能装时为 null。三处（行内角标、标题行、空列表）共用同一串字。 */
+    @Nullable
+    private static String blockedKey(Compat compat) {
+        return switch (compat) {
+            case OK -> null;
+            case NOT_LISTED -> "gui.z_tweaks.refit.blocked.this";
+            case NO_WHITELIST -> "gui.z_tweaks.refit.blocked.slot";
+        };
+    }
+
     /** 选中候选是否在背包里。不在就发不出包（服务端只认自己那份背包），按钮据此禁用。 */
     private boolean selectedOwned() {
-        if (candidates.isEmpty()) {
-            return false;
-        }
-        return candidates.get(Math.min(selected, candidates.size() - 1)).invSlot() >= 0;
+        Candidate c = selectedCandidate();
+        return c != null && c.invSlot() >= 0;
     }
 
     /** 当前槽位是否有可卸下的配件。概览态或空槽一律禁用卸载按钮。 */
@@ -1563,6 +1674,14 @@ public class ZtRefitScreen extends GunRefitScreen {
             return;
         }
         Candidate entry = candidates.get(Math.min(selected, candidates.size() - 1));
+        String blocked = blockedKey(entry.compat());
+        if (blocked != null) {
+            // 护栏只有这一条，双击 / 安装按钮 / ENTER 都走它：不可安装的件在这里就停住，
+            // 不放音效、不发包。服务端那两个包都会静默拒绝（allowAttachment 不过就 return），
+            // 客户端要是照旧弹「已安装」，界面就会说装上了而枪上什么都没有。
+            notify(I18n.get(blocked));
+            return;
+        }
         ItemStack candidate = entry.stack();
         int inventorySlot = entry.invSlot();
         if (inventorySlot >= 0) {
@@ -1642,7 +1761,26 @@ public class ZtRefitScreen extends GunRefitScreen {
      * 避免每行重复查索引）、模组命名空间、它在背包里的槽位（-1 = 背包里没有），
      * 以及它对该参数的边际改善量（只在参数排序 / 筛选时算，见 {@link StatCatalog}）。
      */
-    private record Candidate(ItemStack stack, int invSlot, String name, String modId, double improvement) {
+    private record Candidate(ItemStack stack, int invSlot, Compat compat, String name, String modId,
+                             double improvement) {
+    }
+
+    /**
+     * 能不能装（术语见 `CONTEXT.md`「不可安装」）。两档对应屏幕上两句不同的话：
+     * {@link #NOT_LISTED} 是"这一个装不上"，{@link #NO_WHITELIST} 是"这里什么也装不上"。
+     *
+     * <p>计划里原先列的三个原因（类型不允许 / 标签不匹配 / 配件锁）只有一个真会发生：
+     * {@code allowAttachment} 里没有类型检查（`AbstractGunItem.java:284` 就是一行标签匹配），
+     * 类型那层由"槽位本身合不合法"决定（不合法的槽位压暗、点了弹「不支持 X 槽位」，那些配件
+     * 压根进不了这个列表），配件锁是枪级标志（锁了就开不了改装界面）。</p>
+     */
+    private enum Compat {
+        /** 能装。 */
+        OK,
+        /** 枪有白名单，但不含这一个 —— 角标「装不上这个配件」。 */
+        NOT_LISTED,
+        /** 枪压根没声明白名单 —— 整个槽位都是这一档，角标「这里装不了配件」。 */
+        NO_WHITELIST
     }
 
     /**
@@ -1671,6 +1809,34 @@ public class ZtRefitScreen extends GunRefitScreen {
         } else if (selected >= scroll + rows) {
             scroll = selected - rows + 1;
         }
+    }
+
+    /** 第一个不可安装的行下标；没有就返回 -1（分隔线画在它的上方）。 */
+    private int firstBlockedIndex() {
+        for (int i = 0; i < candidates.size(); i++) {
+            if (candidates.get(i).compat() != Compat.OK) {
+                return i;
+            }
+        }
+        return -1;
+    }
+
+    /** 列表里有没有"枪压根没声明白名单"那一档的行 —— 有的话标题行也要说一次那句话。 */
+    private boolean hasNoWhitelistRows() {
+        for (Candidate c : candidates) {
+            if (c.compat() == Compat.NO_WHITELIST) {
+                return true;
+            }
+        }
+        return false;
+    }
+
+    /** 手上这把枪的 id；拿不到给 null（{@link #whitelistEmpty} 把 null 当"未知"处理）。 */
+    @Nullable
+    private ResourceLocation heldGunId() {
+        ItemStack gun = gunStack();
+        IGun iGun = IGun.getIGunOrNull(gun);
+        return iGun == null ? null : iGun.getGunId(gun);
     }
 
     private Rect installRect() {
@@ -1877,8 +2043,14 @@ public class ZtRefitScreen extends GunRefitScreen {
             attachKey = key;
             attachScroll = 0;
         }
+        String blocked = blockedKey(candidates.get(Math.min(selected, candidates.size() - 1)).compat());
         List<Component> lines = new ArrayList<>();
         lines.add(Component.literal(nameOf(candidate)).withStyle(ChatFormatting.AQUA));
+        if (blocked != null) {
+            // 不可安装的件在这一列只讲"这是什么"与"为什么装不上"（与行内角标同一串字）；
+            // Pros/Cons 与参数不给 —— 见 computeProsCons。
+            lines.add(Component.literal(I18n.get(blocked)).withStyle(ChatFormatting.RED));
+        }
         for (String desc : describe(candidate)) {
             lines.add(Component.literal(desc).withStyle(ChatFormatting.GRAY));
         }
