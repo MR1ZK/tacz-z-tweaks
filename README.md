@@ -20,6 +20,8 @@
 
 操作按键表见 `docs/controls.md`，配置项见 `docs/config.md`。术语表在 `CONTEXT.md`，架构决策记录在 `docs/adr/`，架构笔记在 `docs/session-context.md`。
 
+**接下来要做什么、以及为什么那样做，看 [路线图](https://github.com/MR1ZK/tacz-z-tweaks/issues/1)**——那是一次寻路留下的决策地图，每个待做功能都有一张票承载它的决策与依赖。开工前的规划稿归档在 `docs/refit-plus-plan.md`（已标注哪几节作废），三份源码调研在 `docs/research/`。
+
 ## 怎么安装
 
 装好 Forge 1.20.1，把 TACZ 本体和本模组的 jar 一起丢进 `.minecraft/mods/`。纯客户端，装在自己机器上就行，服务端不用管。
