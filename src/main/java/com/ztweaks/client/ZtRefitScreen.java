@@ -2593,11 +2593,18 @@ public class ZtRefitScreen extends GunRefitScreen {
             return wholeLine ? wholeLabel().append(pair) : label().append(pair);
         }
 
-        /** 整行模板去掉数值后的样子，充当变化列里的标签。 */
+        /** 整行模板去掉数值后的样子，充当变化列里的标签（分隔符规则与 {@link #label()} 同一条）。 */
         private MutableComponent wholeLabel() {
-            String text = I18n.get(key, "").trim();
-            boolean hasSeparator = text.endsWith(":") || text.endsWith("：");
-            return Component.literal(hasSeparator ? text : text + ": ").withStyle(valueFormat);
+            return Component.literal(labelOf(I18n.get(key, ""))).withStyle(valueFormat);
+        }
+
+        /** 标签收尾 + 补分隔符：全角冒号后不再加空格（保持 TACZ 原生观感），半角冒号补一个空格，没有冒号补 {@code ": "}。 */
+        private static String labelOf(String raw) {
+            String trimmed = raw.trim();
+            if (trimmed.endsWith("：")) {
+                return trimmed;
+            }
+            return trimmed.endsWith(":") ? trimmed + " " : trimmed + ": ";
         }
 
         /**
@@ -2612,14 +2619,16 @@ public class ZtRefitScreen extends GunRefitScreen {
         }
 
         /**
-         * TACZ 的标签 key 有的自带冒号（{@code 伤害: }）、有的不带（{@code 射速}）。
-         * 参数卡统一是"标签：值"的写法，所以不带的补一个中英通用的 {@code ": "} ——
-         * TACZ 的文案本身一个字不改。
+         * 参数卡里的标签：TACZ 的标签 key 有三种形态 —— {@code "伤害: "}（半角冒号 + 尾随空格）、
+         * {@code "经验等级："}（全角冒号）、{@code "射速"}（什么都没有）。统一成"标签 + 一个分隔 + 值"：
+         * 先收掉尾随空白，缺分隔符才补 {@code ": "} —— TACZ 的文案本身一个字不改。
+         *
+         * <p>（补这一步是必要的：不补的话 {@code "射速"} 会直接粘成 {@code 射速600rpm}；
+         * 而 {@code "伤害: "} 那种自带尾随空格的，判"有没有冒号"之前必须先 trim，否则会补成
+         * {@code 伤害: : }。）</p>
          */
         private MutableComponent label() {
-            String text = I18n.get(key);
-            boolean hasSeparator = text.endsWith(":") || text.endsWith("：");
-            return Component.literal(hasSeparator ? text : text + ": ").withStyle(ChatFormatting.GRAY);
+            return Component.literal(labelOf(I18n.get(key))).withStyle(ChatFormatting.GRAY);
         }
     }
 
