@@ -1,0 +1,304 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<title>#7 整枪对比面板 · 落点原型</title>
+<style>
+  :root {
+    --accent: #55FFFF;   /* ZtUi ACCENT */
+    --text: #E8E8E8;
+    --dim: #A8AEB5;
+    --muted: #6E7479;
+    --hair: rgba(255,255,255,0.22);
+    --panel: #101010;
+    --green: #55FF55;
+    --red: #FF5555;
+  }
+  body {
+    margin: 0; padding: 24px 28px 60px;
+    background: #17181a; color: var(--text);
+    font: 13px/1.6 "Segoe UI", "Microsoft YaHei", sans-serif;
+  }
+  h1 { font-size: 18px; margin: 0 0 4px; color: var(--accent); }
+  h2 { font-size: 15px; margin: 28px 0 8px; color: var(--accent); }
+  .sub { color: var(--dim); margin: 0 0 18px; }
+  .facts { background: #1e2023; border-left: 3px solid var(--accent); padding: 10px 14px; margin: 0 0 20px; }
+  .facts code { color: var(--accent); }
+  .facts li { margin: 2px 0; }
+  .warn { background: #2a2118; border-left: 3px solid #d0a24a; padding: 8px 14px; color: #e8d7b0; margin: 14px 0; }
+
+  .controls { display: flex; flex-wrap: wrap; gap: 18px; margin: 14px 0 20px; align-items: center; }
+  .controls label { cursor: pointer; padding: 4px 10px; border: 1px solid var(--hair); border-radius: 4px; color: var(--dim); }
+  .controls input:checked + span { color: var(--text); }
+  .controls label:has(input:checked) { border-color: var(--accent); background: rgba(85,255,255,0.08); }
+  .controls input { margin-right: 6px; }
+
+  .stage { margin: 0 0 34px; }
+  .stage > .cap { color: var(--dim); font-size: 12px; margin-bottom: 6px; }
+  .screen {
+    position: relative; background: #0a0a0a; border: 1px solid #333; overflow: hidden;
+    image-rendering: pixelated;
+  }
+  .screen .hint { position: absolute; left: 8px; top: 6px; color: #3a3f45; font: 10px/1 sans-serif; }
+
+  /* 详情条与信息卡：字体按 MC 位图字体的近似度量（advance≈6px，行高 9px，再乘 0.8 缩放） */
+  .detail {
+    position: absolute; left: 6px; bottom: 28px; box-sizing: border-box;
+    background: linear-gradient(rgba(255,255,255,0.05), rgba(0,0,0,0.35));
+    border: 1px solid var(--hair); border-radius: 3px;
+  }
+  .cols { position: absolute; left: 6px; top: 4px; transform-origin: 0 0; }
+  .col { position: absolute; top: 0; font: 8px/8.8px ui-monospace, Consolas, "Courier New", monospace; white-space: pre; letter-spacing: 0.2px; }
+  .c-aqua { color: var(--accent); }
+  .c-gray { color: #9aa0a6; }
+  .k { color: var(--muted); }
+  .v-base { color: var(--dim); }
+  .v-now { color: var(--text); }
+  .up { color: var(--green); }
+  .down { color: var(--red); }
+  .same { color: #4a4f55; }
+  .btnrow { position: absolute; bottom: 4px; right: 0; display: flex; gap: 4px; }
+  .btn { width: 64px; height: 14px; border: 1px solid rgba(63,159,79,0.8); background: rgba(63,159,79,0.25);
+         border-radius: 2px; color: #fff; font: 8px/14px ui-monospace, monospace; text-align: center; }
+  .btn.alt { border-color: rgba(176,74,74,0.8); background: rgba(176,74,74,0.25); }
+  .colhead { position: absolute; top: -1px; font: 7px/9px ui-monospace, monospace; color: var(--muted); }
+
+  .note { color: var(--dim); font-size: 12px; margin: 8px 0 0; }
+  .note b { color: var(--text); }
+  .badge { display: inline-block; padding: 1px 6px; border-radius: 3px; font-size: 11px; }
+  .badge.ok { background: rgba(85,255,85,0.15); color: var(--green); }
+  .badge.bad { background: rgba(255,85,85,0.15); color: var(--red); }
+
+  table { border-collapse: collapse; font-size: 12px; margin-top: 8px; }
+  th, td { border: 1px solid #333; padding: 4px 10px; text-align: left; }
+  th { color: var(--accent); background: #1e2023; }
+  td.n { text-align: right; font-family: ui-monospace, monospace; }
+</style>
+</head>
+<body>
+
+<h1>#7 整枪对比面板 · 落点原型</h1>
+<p class="sub">按 <code>ZtRefitScreen.drawGunInfo</code> 的真实几何画的死数据版，用来看"第三列能装下什么"。不是方案文档。</p>
+
+<div class="facts">
+  <ul>
+    <li>详情条：高 <code>68px</code>，距屏幕底 <code>28px</code>，左右各留 <code>6px</code></li>
+    <li>信息卡：<code>usable = 详情条宽 − 24</code>，<code>screenUnit = usable / 3.5</code>；三列宽 = <code>1.5× / 1.0× / 1.0×</code> unit</li>
+    <li>每列 <b>最多 5 行</b>（<code>INFO_ROWS=5</code>），文字按 <code>0.8</code> 缩放，行高 <code>11 × 0.8 = 8.8px</code></li>
+    <li>第 5 行底部到按钮行还有 <code>4px</code>；宽不够时各列<b>独立滚动</b>（滚轮按指针所在列分流）</li>
+  </ul>
+</div>
+
+<div class="warn">
+  <b>原型与真机的差异</b>：字形是等宽字体近似的（MC 是可变宽位图字体，平均 advance ≈ 6px、行高 9px）。所以"一行能塞几个字"是<b>近似</b>，用来判断"够不够、要不要滚"，不该拿来定最终文案。
+</div>
+
+<div class="controls">
+  <span style="color:var(--dim)">第三列方案：</span>
+  <label><input type="radio" name="variant" value="v1" checked><span>V1 只列变化项</span></label>
+  <label><input type="radio" name="variant" value="v2"><span>V2 全量双列</span></label>
+  <label><input type="radio" name="variant" value="v3"><span>V3 条形对比</span></label>
+  <label><input type="radio" name="variant" value="v4"><span>V4 移出第三列（弹层）</span></label>
+  <span style="color:var(--dim);margin-left:14px">GUI：</span>
+  <label><input type="radio" name="size" value="854"><span>854×480（大）</span></label>
+  <label><input type="radio" name="size" value="640"><span>640×360（scale 3）</span></label>
+  <label><input type="radio" name="size" value="480" checked><span>480×270（scale 4）</span></label>
+</div>
+
+<div id="stages"></div>
+
+<h2>五个数字</h2>
+<table>
+  <tr><th>GUI 尺寸</th><th>详情条宽</th><th>第一列（名字+描述）</th><th>第二列（参数）</th><th>第三列</th><th>第三列折行宽（局部）</th></tr>
+  <tr><td>854×480</td><td class="n">842</td><td class="n">351</td><td class="n">234</td><td class="n">234</td><td class="n">≈292px / 48 字</td></tr>
+  <tr><td>640×360</td><td class="n">628</td><td class="n">264</td><td class="n">176</td><td class="n">176</td><td class="n">≈220px / 36 字</td></tr>
+  <tr><td>480×270</td><td class="n">468</td><td class="n">195</td><td class="n">130</td><td class="n">130</td><td class="n">≈157px / 26 字</td></tr>
+</table>
+<p class="note">行数上限在三种尺寸下都是 <b>5 行</b> —— 它由详情条高度决定，与窗口大小无关。所以问题不是"宽度够不够"，而是 <b>5 行怎么用</b>。</p>
+
+<h2>各方案要回答的问题</h2>
+<ul class="note">
+  <li><b>V1 只列变化项</b>：信息密度最高，但"变化项"随配件而变，行数也在 0～N 之间跳（示例里有 7 项变化 → 仍然溢出，要滚）。列表长度不稳定会不会让人找不着东西？</li>
+  <li><b>V2 全量双列</b>：可预期、一次看全，但 14 项参数在 5 行里要滚 3 屏；而且"没变的项"占掉大部分空间。</li>
+  <li><b>V3 条形对比</b>：一眼看出幅度，但每行要用两根条，宽度在 130px 下够呛；且 #8 明确说了后坐力是样条曲线不能这么比。</li>
+  <li><b>V4 移出第三列</b>：第三列留给 #8 推荐的 6 项新参数（开火模式 → 弹匣容量 → 射速 → 弹速 → 穿透 → 开镜时间），对比面板改成按钮唤出的弹层。代价是多一次点击，收益是"对比"不再受 5 行限制。</li>
+</ul>
+
+<script>
+// 真实公式：详情条宽 = width - 12；usable = 宽 - 24；unit = usable / 3.5
+const SHARE = [1.5, 1.0, 1.0], SCALE = 0.8, ROWS = 5, ROWH = 11 * 0.8;
+
+// 死数据：裸枪 → 当前（M4A1，装了一个瞄具 + 一个枪口）
+const STATS = [
+  ['伤害',      '12.5',  '14.2',  +1],
+  ['护甲穿透',  '42%',   '55%',   +1],
+  ['爆头倍率',  '1.50x', '1.65x', +1],
+  ['有效射程',  '38m',   '42m',   +1],
+  ['弹速',      '310',   '310',    0],
+  ['穿透',      '1',     '2',     +1],
+  ['射速',      '750',   '750',    0],
+  ['开镜时间',  '0.32s', '0.26s', +1],
+  ['重量',      '3.4kg', '4.1kg', -1],
+  ['后坐力',    '0.85',  '0.62',  +1],
+  ['跑射延迟',  '0.18s', '0.18s',  0],
+  ['切枪时间',  '0.55s', '0.55s',  0],
+  ['弹匣',      '30',    '30',     0],
+  ['开火模式',  '全自动','全自动', 0],
+];
+
+function pad(s, n) { return s + ' '.repeat(Math.max(0, n - s.length)); }
+
+function col3(variant, aw) {          // aw = 该列宽（局部像素）
+  const chars = Math.max(8, Math.floor((aw - 6) / 6));   // 近似每字 6px
+  const overflow = t => `…还有 ${t - ROWS} 行（滚动）`;
+  const rows = [];
+
+  if (variant === 'v1') {
+    const changed = STATS.filter(s => s[3] !== 0);
+    for (const [n, b, c, d] of changed) {
+      const cls = d > 0 ? 'up' : 'down';
+      rows.push(`<span class="k">${pad(n, 5)}</span><span class="v-base">${b}</span> <span class="${cls}">→ ${c}</span>`);
+    }
+    if (changed.length > ROWS) rows.push(`<span class="muted k">${overflow(changed.length)}</span>`);
+    return { html: rows, n: changed.length, note: `${changed.length} 项变化（可见 ${Math.min(ROWS, changed.length)} 行）` };
+  }
+
+  if (variant === 'v2') {
+    rows.push(`<span class="k">${pad('参数', 5)}<span class="v-base">裸枪</span>  <span class="v-now">当前</span></span>`);
+    for (const [n, b, c, d] of STATS) {
+      const cls = d > 0 ? 'up' : d < 0 ? 'down' : 'same';
+      rows.push(`<span class="k">${pad(n, 5)}</span><span class="v-base">${pad(b, 6)}</span><span class="${cls}">${c}</span>`);
+    }
+    rows.push(`<span class="muted k">${overflow(STATS.length)}</span>`);
+    return { html: rows, n: STATS.length, note: `${STATS.length} 项全量（要滚 ${Math.ceil(STATS.length / ROWS)} 屏）` };
+  }
+
+  if (variant === 'v3') {
+    const max = 1.8;
+    for (const [n, b, c, d] of STATS.filter(s => s[3] !== 0)) {
+      const bv = parseFloat(b) || 0, cv = parseFloat(c) || 0;
+      const w = Math.max(4, Math.floor((aw - 60) / 2));
+      const bw = Math.max(1, Math.round(Math.min(bv, max) / max * w));
+      const cw = Math.max(1, Math.round(Math.min(cv, max) / max * w));
+      const cls = d > 0 ? 'up' : 'down';
+      rows.push(
+        `<span class="k">${pad(n, 5)}</span>` +
+        `<span style="display:inline-block;width:${w}px">` +
+        `<span style="display:inline-block;width:${bw}px;height:7px;background:#5a5f66;vertical-align:middle"></span>` +
+        `<span style="display:inline-block;width:${cw}px;height:7px;background:currentColor;opacity:.75;vertical-align:middle;margin-left:2px" class="${cls}"></span>` +
+        `</span>`);
+    }
+    return { html: rows, n: rows.length, note: '灰＝裸枪，彩＝当前；后坐力这种样条曲线项其实不该进来' };
+  }
+
+  // v4：第三列留给 #8 推荐的 6 项，对比面板移出
+  const news = [
+    ['开火模式', '全自动'],
+    ['弹匣容量', '30 发'],
+    ['射速',     '750 rpm'],
+    ['弹速',     '310 m/s'],
+    ['穿透',     '2'],
+    ['开镜时间', '0.26s'],
+  ];
+  for (const [n, v] of news) rows.push(`<span class="k">${pad(n, 4)}</span><span class="v-now">${v}</span>`);
+  if (news.length > ROWS) rows.push(`<span class="k">${overflow(news.length)}</span>`);
+  return { html: rows, n: news.length, note: '第三列＝新参数；对比面板由详情条右侧的"对比"按钮唤出弹层' };
+}
+
+function render() {
+  const variant = document.querySelector('input[name=variant]:checked').value;
+  const sizes = [640];
+  const host = document.getElementById('stages');
+  host.innerHTML = '';
+
+  for (const w0 of sizes) {
+    const h0 = Math.round(w0 * 360 / 640);
+    const detailW = w0 - 12;
+    const usable = w0 - 24;
+    const unit = usable / 3.5;
+    const widths = SHARE.map(s => s * unit);
+
+    const stage = document.createElement('div');
+    stage.className = 'stage';
+    stage.innerHTML = `<div class="cap">GUI ${w0}×${h0} — 详情条 ${detailW}px，三列 ${widths.map(x=>Math.round(x)).join(' / ')} px</div>`;
+
+    const screen = document.createElement('div');
+    screen.className = 'screen';
+    screen.style.width = w0 + 'px';
+    screen.style.height = h0 + 'px';
+    screen.style.transform = 'scale(1.6)';
+    screen.style.transformOrigin = '0 0';
+    screen.style.marginBottom = (h0 * 0.6 + 40) + 'px';
+    screen.innerHTML = `<div class="hint">3D 预览区（此处略）</div>`;
+
+    const detail = document.createElement('div');
+    detail.className = 'detail';
+    detail.style.width = detailW + 'px';
+    detail.style.height = '68px';
+
+    // 三列：V4 时第三列换内容
+    const c3 = col3(variant, widths[2] / SCALE);
+    const cols = document.createElement('div');
+    cols.className = 'cols';
+    cols.style.transform = `scale(${SCALE})`;
+
+    const left = [];
+    for (let i = 0; i < 3; i++) {
+      const col = document.createElement('div');
+      col.className = 'col';
+      col.style.left = (SHARE.slice(0, i).reduce((a, b) => a + b, 0) * unit / SCALE) + 'px';
+      col.style.width = (widths[i] / SCALE) + 'px';
+      let lines;
+      if (i === 0) {
+        lines = ['<span class="c-aqua">M4A1 卡宾枪</span>',
+                 '<span class="c-gray">制式突击步枪，改装潜力大。</span>',
+                 '<span class="c-gray">当前：552 红点 + 补偿器</span>'];
+      } else if (i === 1) {
+        lines = STATS.slice(0, 5).map(([n, b, c, d]) => {
+          const cls = d > 0 ? 'up' : d < 0 ? 'down' : 'v-now';
+          return `<span class="k">${pad(n, 5)}</span><span class="${cls}">${c}</span>`;
+        });
+        lines.push('<span class="k">…还有 9 行（滚动）</span>');
+      } else {
+        lines = c3.html;
+      }
+      col.innerHTML = lines.join('\n');
+      cols.appendChild(col);
+    }
+
+    // 列头（真机没有，这里只为看小说）
+    const heads = ['名字 + 描述', '参数（当前）', variant === 'v4' ? '新增参数' : '对比（裸枪 → 当前）'];
+    for (let i = 0; i < 3; i++) {
+      const hd = document.createElement('div');
+      hd.className = 'colhead';
+      hd.style.left = (SHARE.slice(0, i).reduce((a, b) => a + b, 0) * unit) + 'px';
+      hd.textContent = heads[i];
+      cols.appendChild(hd);
+    }
+
+    detail.appendChild(cols);
+    detail.insertAdjacentHTML('beforeend',
+      `<div class="btnrow" style="right:4px">
+         <div class="btn">安装</div><div class="btn alt">卸下</div>
+       </div>`);
+    if (variant === 'v4') {
+      detail.insertAdjacentHTML('beforeend',
+        `<div class="btnrow" style="right:140px"><div class="btn" style="border-color:rgba(85,255,255,.7);background:rgba(85,255,255,.18)">对比…</div></div>`);
+    }
+    screen.appendChild(detail);
+    stage.appendChild(screen);
+
+    const note = document.createElement('p');
+    note.className = 'note';
+    note.innerHTML = `<b>第三列：</b>${c3.note}`;
+    stage.appendChild(note);
+
+    host.appendChild(stage);
+  }
+}
+
+document.querySelectorAll('input[name=variant]').forEach(el => el.addEventListener('change', render));
+render();
+</script>
+</body>
+</html>
