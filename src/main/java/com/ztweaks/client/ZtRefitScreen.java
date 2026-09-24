@@ -185,6 +185,18 @@ public class ZtRefitScreen extends GunRefitScreen {
      * 两列因此不会各算一套，也不会顺序对不上（issue #7/#8）。
      */
     private List<ParamRow> infoRows = new ArrayList<>();
+    /** 变化列自己的滚动偏移：它可能超过一屏，且与第二列的滚动互不干涉。 */
+    private int deltaScroll = 0;
+    /**
+     * 变化列的缓存键：枪 id + NBT + 候选件 id。三者任一变了才重算 —— 一次重算要跑两次
+     * {@code AttachmentDataUtils} 全量遍历，不能每帧来（issue #9 的细则 3）。
+     */
+    @Nullable
+    private ResourceLocation deltaGunId = null;
+    @Nullable
+    private CompoundTag deltaGunTag = null;
+    @Nullable
+    private ResourceLocation deltaItemId = null;
     /** 各列独立滚动的偏移量，以及上一帧算出的各列行数（用来夹取偏移）。 */
     private final int[] infoScroll = new int[INFO_COLUMNS];
     private int[] infoColumnLines = new int[INFO_COLUMNS];
@@ -1288,13 +1300,19 @@ public class ZtRefitScreen extends GunRefitScreen {
         // Pros/Cons 两栏：不写"优点 N / 缺点 N"标题，靠栏色（绿/红）与条目前缀区分；
         // 省下的标题行高度直接换成多显示一条条目。
         int columnX = x + leftWidth + 6;
-        int columnWidth = (width - leftWidth - 20) / 2;
-        int rightColumnX = columnX + columnWidth + 8;
+        // 右侧三等分：Pros / Cons / 变化列（第三列）。变化列是 issue #7 定的"只列变化项"，
+        // 由候选件驱动（issue #9）。480×270 下每段约 93px —— V1 那种"参数名 + 两个数"的行
+        // 本来就只有十几个字符，装得下（原型见 docs/prototypes/compare-panel.html）。
+        int columnWidth = (width - leftWidth - 26) / 3;
+        int rightColumnX = columnX + columnWidth + 7;
+        int deltaColumnX = rightColumnX + columnWidth + 7;
         int entryTop = y + 5;
         // 条目数按按钮位置反推，避免最后一行压到按钮上（按钮挪了这里自动跟着变）
         int entryLimit = Math.max(1, (installRect().y() - 2 - entryTop) / 10);
+        refreshParamChanges(selectedCandidate());
         drawPropertyColumn(graphics, columnX, columnWidth, entryTop, entryLimit, pros, GOOD);
         drawPropertyColumn(graphics, rightColumnX, columnWidth, entryTop, entryLimit, cons, BAD);
+        drawParamChanges(graphics, deltaColumnX, columnWidth, entryTop, entryLimit);
 
         Rect installRect = installRect();
         Rect unloadRect = unloadRect();
@@ -1592,6 +1610,12 @@ public class ZtRefitScreen extends GunRefitScreen {
         if (candidateListVisible() && listRect().contains(mouseX, mouseY)
                 && !searchRect().contains(mouseX, mouseY) && !sortRect().contains(mouseX, mouseY)) {
             scroll -= (int) Math.signum(delta);
+            return true;
+        }
+        // 选中配件时：指针落在变化列上就滚它自己（可能超过一屏）
+        if (candidateListVisible() && !candidates.isEmpty()
+                && deltaColumnRect().contains(mouseX, mouseY)) {
+            deltaScroll -= (int) Math.signum(delta);
             return true;
         }
         // 选中配件时：指针落在详情条左列就滚配件描述
@@ -1942,7 +1966,8 @@ public class ZtRefitScreen extends GunRefitScreen {
      * <p>两种形态都要能在变化列里渲染成「旧 → 新」，所以整行模板那一类必须留着模板本身 ——
      * 只存"渲染好的字符串"就没法把新值塞回去了。</p>
      */
-    private record ParamRow(@Nullable String key, boolean wholeLine, String value, ChatFormatting valueFormat) {
+    private record ParamRow(@Nullable String key, boolean wholeLine, String value, ChatFormatting valueFormat,
+                            double raw, boolean higherIsBetter) {
 
         /** 参数卡（第二列）里的样子：标签灰 + 数值白。 */
         Component line() {
@@ -1953,15 +1978,26 @@ public class ZtRefitScreen extends GunRefitScreen {
             return wholeLine ? Component.translatable(key, v) : label().append(v);
         }
 
-        /** 变化列（第三列）里的样子：标签不变，数值换成「旧 → 新」。 */
-        Component changeLine(String before) {
-            Component pair = Component.literal(before).withStyle(ChatFormatting.DARK_GRAY)
+        /** 变化列（第三列）里的样子：标签不变，数值换成「旧 → 新」，新值按好坏染色。 */
+        Component changeLine(ParamRow before) {
+            Component pair = Component.literal(before.value).withStyle(ChatFormatting.DARK_GRAY)
                     .append(Component.literal(" → ").withStyle(ChatFormatting.GRAY))
-                    .append(Component.literal(value).withStyle(valueFormat));
+                    .append(Component.literal(value).withStyle(changeFormat(before)));
             if (key == null) {
                 return pair;
             }
             return wholeLine ? Component.translatable(key, pair) : label().append(pair);
+        }
+
+        /**
+         * 新值的颜色：按"变大是变好还是变坏"判，和原型（`docs/prototypes/compare-panel.html`）
+         * 的 V1 一致 —— 那是这一列最省事的读法，不用先去第二列找原值。
+         */
+        private ChatFormatting changeFormat(ParamRow before) {
+            if (Double.isNaN(raw) || Double.isNaN(before.raw) || raw == before.raw) {
+                return ChatFormatting.WHITE;
+            }
+            return (raw > before.raw) == higherIsBetter ? ChatFormatting.GREEN : ChatFormatting.RED;
         }
 
         /**
@@ -1991,7 +2027,7 @@ public class ZtRefitScreen extends GunRefitScreen {
                                             @Nullable AttachmentCacheProperty cache) {
         List<ParamRow> rows = new ArrayList<>();
         rows.add(new ParamRow(null, false, AmmoItemBuilder.create().setId(gunData.getAmmoId()).build()
-                .getHoverName().getString(), ChatFormatting.GRAY));
+                .getHoverName().getString(), ChatFormatting.GRAY, Double.NaN, true));
 
         int level = iGun.getLevel(gun);
         String levelText;
@@ -2004,47 +2040,55 @@ public class ZtRefitScreen extends GunRefitScreen {
             float percent = (toNext + expCurrent) == 0 ? 0f : expCurrent * 100f / (toNext + expCurrent);
             levelText = String.format("%d (%.1f%%)", level, percent);
         }
-        rows.add(new ParamRow("tooltip.tacz.gun.level", false, levelText, ChatFormatting.WHITE));
+        rows.add(new ParamRow("tooltip.tacz.gun.level", false, levelText, ChatFormatting.WHITE, level, true));
         rows.add(new ParamRow("tooltip.tacz.gun.type", false,
-                I18n.get("tacz.type." + index.getType() + ".name"), ChatFormatting.WHITE));
+                I18n.get("tacz.type." + index.getType() + ".name"), ChatFormatting.WHITE, Double.NaN, true));
 
-        String damage = DAMAGE_FORMAT.format(AttachmentDataUtils.getDamageWithAttachment(gun, gunData));
+        double damageValue = AttachmentDataUtils.getDamageWithAttachment(gun, gunData);
+        String damage = DAMAGE_FORMAT.format(damageValue);
         ExplosionData explosion = gunData.getBulletData().getExplosionData();
         if (explosion != null
                 && (AttachmentDataUtils.isExplodeEnabled(gun, gunData) || explosion.isExplode())) {
-            damage += " + " + DAMAGE_FORMAT.format(explosion.getDamage() * SyncConfig.DAMAGE_BASE_MULTIPLIER.get())
-                    + I18n.get("tooltip.tacz.gun.explosion");
+            double extra = explosion.getDamage() * SyncConfig.DAMAGE_BASE_MULTIPLIER.get();
+            damage += " + " + DAMAGE_FORMAT.format(extra) + I18n.get("tooltip.tacz.gun.explosion");
+            // 爆炸那一截也算进数值：不然"装个带爆炸的配件"在变化列里看不出来
+            damageValue += extra;
         }
-        rows.add(new ParamRow("tooltip.tacz.gun.damage", false, damage, ChatFormatting.WHITE));
+        rows.add(new ParamRow("tooltip.tacz.gun.damage", false, damage, ChatFormatting.WHITE, damageValue, true));
 
         // 这三行的文案把数值包在 key 里（"25% 原版护甲穿透"），整行只有一种色；
         // 移动速度是负面数值，整行用红
         double armor = Mth.clamp(AttachmentDataUtils.getArmorIgnoreWithAttachment(gun, gunData), 0.0, 1.0);
         rows.add(new ParamRow("tooltip.tacz.gun.armor_ignore", true, PERCENT_FORMAT.format(armor),
-                ChatFormatting.GRAY));
-        rows.add(new ParamRow("tooltip.tacz.gun.head_shot_multiplier", true,
-                PERCENT_FORMAT.format(AttachmentDataUtils.getHeadshotMultiplier(gun, gunData)),
-                ChatFormatting.GRAY));
-        rows.add(new ParamRow("tooltip.tacz.gun.movement_speed", true, PERCENT_1_FORMAT.format(
-                -SyncConfig.WEIGHT_SPEED_MULTIPLIER.get()
-                        * AttachmentDataUtils.getWightWithAttachment(gun, gunData)), ChatFormatting.RED));
+                ChatFormatting.GRAY, armor, true));
+        double headShot = AttachmentDataUtils.getHeadshotMultiplier(gun, gunData);
+        rows.add(new ParamRow("tooltip.tacz.gun.head_shot_multiplier", true, PERCENT_FORMAT.format(headShot),
+                ChatFormatting.GRAY, headShot, true));
+        double moveSpeed = -SyncConfig.WEIGHT_SPEED_MULTIPLIER.get()
+                * AttachmentDataUtils.getWightWithAttachment(gun, gunData);
+        rows.add(new ParamRow("tooltip.tacz.gun.movement_speed", true, PERCENT_1_FORMAT.format(moveSpeed),
+                ChatFormatting.RED, moveSpeed, true));
 
-        // ---- 以下六项是 issue #8 补的 ----
+        // ---- 以下六项是 issue #8 补的；方向照各 modifier 自己的 positivelyBetter ----
         rows.add(new ParamRow("gui.tacz.gun_refit.property_diagrams.fire_mode", false,
                 I18n.get("gui.tacz.gun_refit.property_diagrams."
-                        + iGun.getFireMode(gun).name().toLowerCase(Locale.ROOT)), ChatFormatting.WHITE));
+                        + iGun.getFireMode(gun).name().toLowerCase(Locale.ROOT)),
+                ChatFormatting.WHITE, Double.NaN, true));
+        int capacity = ammoCapacity(gun, gunData);
         rows.add(new ParamRow("gui.tacz.gun_refit.property_diagrams.ammo_capacity", false,
-                String.valueOf(ammoCapacity(gun, gunData)), ChatFormatting.WHITE));
+                String.valueOf(capacity), ChatFormatting.WHITE, capacity, true));
+        double rpm = numberOr(cache, "rpm", iGun.getRPM(gun));
         rows.add(new ParamRow("gui.tacz.gun_refit.property_diagrams.rpm", false,
-                Math.round(numberOr(cache, "rpm", iGun.getRPM(gun))) + "rpm", ChatFormatting.WHITE));
+                Math.round(rpm) + "rpm", ChatFormatting.WHITE, rpm, true));
+        double bulletSpeed = numberOr(cache, "ammo_speed", gunData.getBulletData().getSpeed());
         rows.add(new ParamRow("gui.tacz.gun_refit.property_diagrams.ammo_speed", false,
-                Math.round(numberOr(cache, "ammo_speed", gunData.getBulletData().getSpeed())) + "m/s",
-                ChatFormatting.WHITE));
+                Math.round(bulletSpeed) + "m/s", ChatFormatting.WHITE, bulletSpeed, true));
+        double pierce = numberOr(cache, "pierce", gunData.getBulletData().getPierce());
         rows.add(new ParamRow("gui.tacz.gun_refit.property_diagrams.pierce", false,
-                String.valueOf(Math.round(numberOr(cache, "pierce", gunData.getBulletData().getPierce()))),
-                ChatFormatting.WHITE));
+                String.valueOf(Math.round(pierce)), ChatFormatting.WHITE, pierce, true));
+        double ads = numberOr(cache, "ads", gunData.getAimTime());
         rows.add(new ParamRow("gui.tacz.gun_refit.property_diagrams.ads", false,
-                String.format("%.2fs", numberOr(cache, "ads", gunData.getAimTime())), ChatFormatting.WHITE));
+                String.format("%.2fs", ads), ChatFormatting.WHITE, ads, false));
         return rows;
     }
 
@@ -2075,6 +2119,88 @@ public class ZtRefitScreen extends GunRefitScreen {
             // getCache 对未注册的 id 会 NPE（它直接 get(...).getValue()），按"取不到"处理
             return fallback;
         }
+    }
+
+    /**
+     * 变化列（第三列）：把"装上前"与"装上后"两张参数卡按同一顺序逐行比，只留显示值变了的行
+     * （issue #7：固定顺序、没变化的不出现、绝对双值、不画条形）。
+     *
+     * <p>重算只在"枪 + NBT + 候选件"三元组变了的时候发生 —— 一次重算要跑两次
+     * {@link AttachmentDataUtils} 全量遍历与一次 {@code eval}，不能每帧来（issue #9 的细则 3）。</p>
+     */
+    private void refreshParamChanges(@Nullable Candidate preview) {
+        if (preview == null || preview.compat() != Compat.OK) {
+            infoExtra.clear();
+            deltaScroll = 0;
+            deltaGunId = null;
+            deltaGunTag = null;
+            deltaItemId = null;
+            return;
+        }
+        // 第二列可能还没为"当前这把枪"重建过（概览态才画卡，切槽后枪可能已经变样）：
+        // buildGunInfo 自带 枪 id + NBT 缓存，命中就什么都不做。
+        buildGunInfo();
+        if (infoRows.isEmpty()) {
+            return;
+        }
+        ItemStack gun = gunStack();
+        IGun iGun = IGun.getIGunOrNull(gun);
+        if (iGun == null) {
+            return;
+        }
+        CommonGunIndex index = TimelessAPI.getCommonGunIndex(iGun.getGunId(gun)).orElse(null);
+        if (index == null) {
+            return;
+        }
+        IAttachment iAttachment = IAttachment.getIAttachmentOrNull(preview.stack());
+        ResourceLocation itemId = iAttachment == null ? null : iAttachment.getAttachmentId(preview.stack());
+        ResourceLocation gunId = iGun.getGunId(gun);
+        CompoundTag tag = gun.getTag();
+        if (gunId.equals(deltaGunId) && Objects.equals(deltaGunTag, tag)
+                && Objects.equals(deltaItemId, itemId)) {
+            return;
+        }
+        deltaGunId = gunId;
+        deltaGunTag = tag == null ? null : tag.copy();
+        deltaItemId = itemId;
+        deltaScroll = 0;
+        // 装到克隆栈上算，不碰手上那把枪（与 measureImprovement、虚拟装配同一条路子）
+        ItemStack modified = gun.copy();
+        iGun.installAttachment(modified, preview.stack());
+        List<ParamRow> after = paramRows(modified, iGun, index.getGunData(), index,
+                baseCache(modified, index.getGunData()));
+        infoExtra.clear();
+        for (int i = 0; i < infoRows.size() && i < after.size(); i++) {
+            ParamRow before = infoRows.get(i);
+            ParamRow now = after.get(i);
+            if (!before.value().equals(now.value())) {
+                infoExtra.add(now.changeLine(before));
+            }
+        }
+    }
+
+    /**
+     * 画变化列一屏。行数可能比一屏多（一个红点 + 一个补偿器就有 7 项），所以这一列独立可滚 ——
+     * 滚轮落在它上面时滚它自己（见 {@link #mouseScrolled}）。
+     */
+    private void drawParamChanges(GuiGraphics graphics, int x, int width, int entryTop, int limit) {
+        List<FormattedCharSequence> lines = new ArrayList<>();
+        for (Component line : infoExtra) {
+            lines.addAll(this.font.split(line, width));
+        }
+        deltaScroll = Mth.clamp(deltaScroll, 0, Math.max(0, lines.size() - limit));
+        for (int i = deltaScroll; i < Math.min(lines.size(), deltaScroll + limit); i++) {
+            graphics.drawString(this.font, lines.get(i), x, entryTop + (i - deltaScroll) * 10, TEXT, false);
+        }
+    }
+
+    /** 变化列（第三列）的矩形：滚轮判定与绘制同源，几何不各写一份。 */
+    private Rect deltaColumnRect() {
+        int width = this.width - PAD * 2;
+        int leftWidth = (int) (width * 0.40f);
+        int columnX = PAD + leftWidth + 6;
+        int columnWidth = (width - leftWidth - 26) / 3;
+        return new Rect(columnX + 2 * (columnWidth + 7), detailY(), columnWidth, DETAIL_H);
     }
 
     /**
