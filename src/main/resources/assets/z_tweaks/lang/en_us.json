@@ -65,6 +65,7 @@
   "gui.z_tweaks.refit.preset.button": "Presets",
   "gui.z_tweaks.refit.preset.tooltip": "Presets: left-click to apply, right-click to delete; save / import / export below",
   "gui.z_tweaks.refit.preset.save": "Save current as preset…",
+  "gui.z_tweaks.refit.preset.save_button": "Save",
   "gui.z_tweaks.refit.preset.import": "Import from clipboard…",
   "gui.z_tweaks.refit.preset.export": "Export '%s' to clipboard",
   "gui.z_tweaks.refit.preset.export_hint": "Export… (apply or save one first)",

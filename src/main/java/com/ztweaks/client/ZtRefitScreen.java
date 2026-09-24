@@ -1006,7 +1006,12 @@ public class ZtRefitScreen extends GunRefitScreen {
         }
         syncPreview();
         drawDetail(graphics, mouseX, mouseY);
-        // 预设那一层：按钮 → 弹层 → 确认面板 → 名字输入，一层压一层（画在最后 = 命中判定排最前）
+        if (showNativeBars && ZtConfig.DEBUG_NATIVE_BARS.get()) {
+            GunPropertyDiagrams.draw(graphics, this.font, 11, 96);
+        }
+        drawOverlay(graphics);
+        // 预设那一层画在所有面板与浮层之上：按钮 → 弹层 → 确认面板 → 命名行（含保存按钮）。
+        // 画在最后 = 鼠标判定排最前（见 mouseClicked），也不会被调试 HUD 盖住。
         drawPresetButton(graphics, mouseX, mouseY);
         if (presetMenuOpen) {
             drawPresetMenu(graphics, mouseX, mouseY);
@@ -1016,11 +1021,10 @@ public class ZtRefitScreen extends GunRefitScreen {
         }
         if (namingPreset && presetNameBox != null) {
             presetNameBox.render(graphics, mouseX, mouseY, partialTick);
+            // 命名行右侧的"保存"：回车之外的第二个入口
+            button(graphics, this.font, presetSaveRect(), I18n.get("gui.z_tweaks.refit.preset.save_button"),
+                    !dragging && presetSaveRect().contains(mouseX, mouseY), true, true);
         }
-        if (showNativeBars && ZtConfig.DEBUG_NATIVE_BARS.get()) {
-            GunPropertyDiagrams.draw(graphics, this.font, 11, 96);
-        }
-        drawOverlay(graphics);
         flushTooltip(graphics);
     }
 
@@ -1293,10 +1297,12 @@ public class ZtRefitScreen extends GunRefitScreen {
     private static final int PC_OK = 0;
     private static final int PC_CANCEL = 1;
 
-    /** 详情条上的"预设"按钮，坐在安装 / 卸下的左边。概览态也画 —— 预设是整枪层面的事。 */
+    /**
+     * 左上角的"预设"按钮。**放左上角是用户实测后的定案**：预设是整枪层面的事，不跟详情条抢地方，
+     * 也不受"概览态不画安装 / 卸下按钮"那条规则影响 —— 两种模式下都在同一个地方。
+     */
     private Rect presetRect() {
-        Rect install = installRect();
-        return new Rect(install.x() - 68, install.y(), 64, 14);
+        return new Rect(PAD, 4, 64, 14);
     }
 
     private void drawPresetButton(GuiGraphics graphics, int mouseX, int mouseY) {
@@ -1337,14 +1343,16 @@ public class ZtRefitScreen extends GunRefitScreen {
         return Math.max(0, presetMenuContentHeight() - presetMenuRect().h());
     }
 
-    /** 弹层外框：贴按钮上方、向上展开，并夹进窗口。预设多了就靠滚（与排序层同一条路子）。 */
+    /**
+     * 弹层外框：按钮**正下方**往下长（按钮在左上角，所以不再向上展开），并夹进窗口。
+     * 命名流程开着时让开那一行，预设多了就靠滚（与排序层同一条路子）。
+     */
     private Rect presetMenuRect() {
-        Rect button = presetRect();
-        int bottom = button.y() - 2;
+        Rect anchor = namingPreset ? presetNameRect() : presetRect();
+        int top = anchor.y() + anchor.h() + 2;
         int height = Math.min(presetMenuContentHeight(),
-                Math.max(MENU_ROW_H * 2 + MENU_PAD * 2, bottom - 2));
-        int x = Math.min(button.x() + button.w() - PRESET_MENU_W, this.width - PRESET_MENU_W - 2);
-        return new Rect(Math.max(2, x), bottom - height, PRESET_MENU_W, height);
+                Math.max(MENU_ROW_H * 2 + MENU_PAD * 2, detailY() - top - 4));
+        return new Rect(presetRect().x(), top, PRESET_MENU_W, height);
     }
 
     /** 鼠标落在弹层里的哪一行；落在内边距 / 分隔条 / 外面返回 {@link #PM_NONE}。 */
@@ -1415,18 +1423,24 @@ public class ZtRefitScreen extends GunRefitScreen {
         };
     }
 
-    /** 命名输入框的矩形：弹层上方，与确认面板同一处。 */
+    /** 命名行：按钮正下方，左边是输入框。 */
     private Rect presetNameRect() {
-        Rect menu = presetMenuRect();
-        int width = 160;
-        return new Rect(this.width / 2 - width / 2, menu.y() - 16, width, 12);
+        Rect button = presetRect();
+        return new Rect(button.x(), button.y() + button.h() + 2, 108, 12);
     }
 
-    /** 确认 / 导入预览面板：把干跑结果摆出来，玩家点了才动手（issue #10 的决定）。 */
+    /** 命名行右侧那颗"保存"按钮：回车之外的第二个入口（用户实测后要的）。 */
+    private Rect presetSaveRect() {
+        Rect name = presetNameRect();
+        return new Rect(name.x() + name.w() + 4, name.y(), 40, 12);
+    }
+
+    /** 确认 / 导入预览面板：与弹层同一处起头（左上角往下），玩家点了才动手。 */
     private Rect presetConfirmRect() {
         int width = 250;
         int height = MENU_PAD * 2 + presetConfirmLines().size() * 11 + MENU_ROW_H + 2;
-        return new Rect((this.width - width) / 2, Math.max(2, detailY() - 6 - height), width, height);
+        int top = presetRect().y() + presetRect().h() + 2;
+        return new Rect(presetRect().x(), Math.min(top, Math.max(2, this.height - height - 4)), width, height);
     }
 
     private List<String> presetConfirmLines() {
@@ -1759,6 +1773,11 @@ public class ZtRefitScreen extends GunRefitScreen {
         if (super.mouseClicked(mouseX, mouseY, button)) {
             return true;
         }
+        // 命名行里的"保存"按钮（点到名字输入框里的那一下，上一行已经交给输入框自己处理了）
+        if (namingPreset && presetSaveRect().contains(mouseX, mouseY)) {
+            saveCurrentAsPreset();
+            return true;
+        }
         // 预设这一族画在其它一切之上，所以它们的命中判定排在最前（与绘制顺序相反）
         if (pendingPlan != null || pendingImport != null) {
             int row = presetConfirmKeyAt(mouseX, mouseY);
@@ -1970,6 +1989,28 @@ public class ZtRefitScreen extends GunRefitScreen {
         if (searchBox != null && searchBox.isFocused()) {
             return super.keyPressed(keyCode, scanCode, modifiers);
         }
+        // 预设的名字输入框比一切都优先：不排在最前，下面的"ENTER = 安装"会先把回车吃掉
+        // （症状：保存预设时按回车，弹出来的是「没有可安装的候选配件」）。
+        if (namingPreset) {
+            if (keyCode == GLFW.GLFW_KEY_ENTER || keyCode == GLFW.GLFW_KEY_KP_ENTER) {
+                saveCurrentAsPreset();
+                return true;
+            }
+            if (keyCode == GLFW.GLFW_KEY_ESCAPE) {
+                stopNaming();
+                return true;
+            }
+            // 其余按键交给输入框自己（退格、方向键、字符）
+            return super.keyPressed(keyCode, scanCode, modifiers);
+        }
+        // ESC 先收预设那一层（弹层 / 确认面板），而不是直接关界面
+        if (keyCode == GLFW.GLFW_KEY_ESCAPE
+                && (presetMenuOpen || pendingPlan != null || pendingImport != null)) {
+            closePresetMenu();
+            pendingPlan = null;
+            pendingImport = null;
+            return true;
+        }
         // 1–6 选槽位，上下键切换候选配件
         if (keyCode >= GLFW.GLFW_KEY_1 && keyCode <= GLFW.GLFW_KEY_6) {
             List<AttachmentType> types = slotTypes();
@@ -2002,23 +2043,6 @@ public class ZtRefitScreen extends GunRefitScreen {
         }
         if (keyCode == GLFW.GLFW_KEY_G && ZtConfig.DEBUG_NATIVE_BARS.get()) {
             showNativeBars = !showNativeBars;
-            return true;
-        }
-        // 名字输入框优先吃键：回车保存、ESC 放弃；此时别的快捷键（数字选槽、ENTER 安装）都要让路
-        if (namingPreset) {
-            if (keyCode == GLFW.GLFW_KEY_ENTER || keyCode == GLFW.GLFW_KEY_KP_ENTER) {
-                saveCurrentAsPreset();
-                return true;
-            }
-            if (keyCode == GLFW.GLFW_KEY_ESCAPE) {
-                stopNaming();
-                return true;
-            }
-            return super.keyPressed(keyCode, scanCode, modifiers);
-        }
-        // ESC 先关预设那一层，而不是直接关界面
-        if (presetMenuOpen && keyCode == GLFW.GLFW_KEY_ESCAPE) {
-            closePresetMenu();
             return true;
         }
         if (keyCode == GLFW.GLFW_KEY_V && ZtConfig.DEBUG_CAMERA_HOTKEY.get()) {
@@ -2097,6 +2121,8 @@ public class ZtRefitScreen extends GunRefitScreen {
 
     private void clickPresetMenu(int key, int button) {
         if (key >= 0 && key < presets.size()) {
+            // 从命名流程里点了一行预设：先把没写完的名字收掉，别让输入框留在屏幕上
+            stopNaming();
             PresetStore.Preset preset = presets.get(key);
             if (button == 1) {
                 // 右键 = 删除，与候选行的"右键 = 卸下"同一族手势

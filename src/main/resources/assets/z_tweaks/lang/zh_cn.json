@@ -65,6 +65,7 @@
   "gui.z_tweaks.refit.preset.button": "预设",
   "gui.z_tweaks.refit.preset.tooltip": "预设：左键应用、右键删除；下面还有保存 / 导入 / 导出",
   "gui.z_tweaks.refit.preset.save": "保存当前为预设…",
+  "gui.z_tweaks.refit.preset.save_button": "保存",
   "gui.z_tweaks.refit.preset.import": "从剪贴板导入…",
   "gui.z_tweaks.refit.preset.export": "导出「%s」到剪贴板",
   "gui.z_tweaks.refit.preset.export_hint": "导出…（先应用或保存一份）",
