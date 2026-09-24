@@ -2579,7 +2579,7 @@ public class ZtRefitScreen extends GunRefitScreen {
             return wholeLine ? Component.translatable(key, v) : label().append(v);
         }
 
-        /** 变化列（第三列）里的样子：标签不变，数值换成「旧 → 新」，新值按好坏染色。 */
+        /** 变化列（第三列）里的样子：标签在前，数值换成「旧 → 新」，新值按好坏染色。 */
         Component changeLine(ParamRow before) {
             Component pair = Component.literal(before.value).withStyle(ChatFormatting.DARK_GRAY)
                     .append(Component.literal(" → ").withStyle(ChatFormatting.GRAY))
@@ -2587,7 +2587,17 @@ public class ZtRefitScreen extends GunRefitScreen {
             if (key == null) {
                 return pair;
             }
-            return wholeLine ? Component.translatable(key, pair) : label().append(pair);
+            // 整行模板那一类（"25% 原版护甲穿透" / "移动速度：25%"）在变化列里**不能原样套**：
+            // 模板把数值放在句首，套上去会写成"25% → 30% 原版护甲穿透"，看不出在说哪个参数。
+            // 这里把模板按空值渲染一次当标签用，再补分隔符（自带冒号的那些就不用补）。
+            return wholeLine ? wholeLabel().append(pair) : label().append(pair);
+        }
+
+        /** 整行模板去掉数值后的样子，充当变化列里的标签。 */
+        private MutableComponent wholeLabel() {
+            String text = I18n.get(key, "").trim();
+            boolean hasSeparator = text.endsWith(":") || text.endsWith("：");
+            return Component.literal(hasSeparator ? text : text + ": ").withStyle(valueFormat);
         }
 
         /**
