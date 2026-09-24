@@ -744,26 +744,72 @@ public class ZtRefitScreen extends GunRefitScreen {
      * （{@code AttachmentData.getModifier()} → {@code JsonProperty.getComponents()}），
      * 按文本自带的颜色码分栏。
      */
-    private void computeProsCons() {
+    /**
+     * 详情条"这一条在说谁"：**悬停行优先，没有悬停就是选中件**。
+     *
+     * <p>issue #9 的细则 4：鼠标移出列表立刻回到 {@code selected}，不保持最后一次悬停 ——
+     * {@code selected} 是玩家有意按下的动作，移动鼠标不该改变"详情条在说谁"的长期状态。</p>
+     */
+    @Nullable
+    private Candidate previewCandidate() {
+        if (hoveredRow >= 0 && hoveredRow < candidates.size()) {
+            return candidates.get(hoveredRow);
+        }
+        return selectedCandidate();
+    }
+
+    /**
+     * 详情条的统一入口：按"枪 + NBT + 预览件"这个三元组重算整条（Pros/Cons + 变化列），
+     * 命中缓存就什么都不做。
+     *
+     * <p>Pros/Cons 原来是在 {@code render()} 里**每帧无条件**跑的（两次 {@code eval}），现在与
+     * 变化列共用同一个键、同一次重算 —— issue #9 细则 3 说的"同一个入口，改一次比改两次便宜"
+     * 就是这里，顺带还掉 session-context 里登记的那笔性能债。</p>
+     */
+    private void refreshPreview() {
+        ItemStack gun = gunStack();
+        IGun iGun = IGun.getIGunOrNull(gun);
+        Candidate preview = previewCandidate();
+        ResourceLocation gunId = iGun == null ? null : iGun.getGunId(gun);
+        CompoundTag tag = gun.getTag();
+        ResourceLocation itemId = preview == null ? null : attachmentIdOf(preview.stack());
+        if (Objects.equals(gunId, deltaGunId) && Objects.equals(deltaGunTag, tag)
+                && Objects.equals(deltaItemId, itemId)) {
+            return;
+        }
+        deltaGunId = gunId;
+        deltaGunTag = tag == null ? null : tag.copy();
+        deltaItemId = itemId;
+        deltaScroll = 0;
+        infoExtra.clear();
         pros.clear();
         cons.clear();
         neutral.clear();
-        if (candidates.isEmpty()) {
+        if (preview == null || iGun == null) {
             return;
         }
-        if (selectedCompat() != Compat.OK) {
-            // 不可安装的件不给 Pros/Cons 与参数：那是"装上之后"的账，而这个组合不存在。
+        if (preview.compat() != Compat.OK) {
+            // 不可安装的件不给 Pros/Cons 与参数：那是"装上之后"的账，而这个组合不存在
+            //（与 #9 拒绝"一把不存在的枪配一组真实的数"同一条理由）。
             return;
         }
         if (ZtConfig.PROS_CONS_MODE.get() == ZtConfig.ProsConsMode.TACZ_TEXT) {
-            computeProsConsTaczText();
+            computeProsConsTaczText(preview);
         } else {
-            computeProsConsDelta();
+            computeProsConsDelta(preview);
         }
+        computeParamChanges(preview, gun, iGun);
     }
 
-    private void computeProsConsTaczText() {
-        ItemStack candidate = candidates.get(Math.min(selected, candidates.size() - 1)).stack();
+    /** 配件 id；拿不到给 null（详情条缓存键用）。 */
+    @Nullable
+    private static ResourceLocation attachmentIdOf(ItemStack stack) {
+        IAttachment attachment = IAttachment.getIAttachmentOrNull(stack);
+        return attachment == null ? null : attachment.getAttachmentId(stack);
+    }
+
+    private void computeProsConsTaczText(Candidate preview) {
+        ItemStack candidate = preview.stack();
         IAttachment iAttachment = IAttachment.getIAttachmentOrNull(candidate);
         if (iAttachment == null) {
             return;
@@ -798,7 +844,7 @@ public class ZtRefitScreen extends GunRefitScreen {
      * 各属性自己的规则换算过并带好单位，跟原生属性条完全对齐。解析不到时才退回自算 +
      * {@link #unitOf} 的近似写法。</p>
      */
-    private void computeProsConsDelta() {
+    private void computeProsConsDelta(Candidate preview) {
         LocalPlayer player = getMinecraft().player;
         if (player == null) {
             return;
@@ -808,7 +854,7 @@ public class ZtRefitScreen extends GunRefitScreen {
         if (iGun == null) {
             return;
         }
-        ItemStack candidate = candidates.get(Math.min(selected, candidates.size() - 1)).stack();
+        ItemStack candidate = preview.stack();
         GunData gunData = TimelessAPI.getCommonGunIndex(iGun.getGunId(gun))
                 .map(CommonGunIndex::getGunData).orElse(null);
         if (gunData == null) {
@@ -920,7 +966,7 @@ public class ZtRefitScreen extends GunRefitScreen {
     public void render(GuiGraphics graphics, int mouseX, int mouseY, float partialTick) {
         super.render(graphics, mouseX, mouseY, partialTick);
         rebuildCandidates();
-        computeProsCons();
+        refreshPreview();
         if (samplesDirty && ZtConfig.DEBUG_SAMPLES.get()) {
             computeSamples();
         }
@@ -1309,7 +1355,6 @@ public class ZtRefitScreen extends GunRefitScreen {
         int entryTop = y + 5;
         // 条目数按按钮位置反推，避免最后一行压到按钮上（按钮挪了这里自动跟着变）
         int entryLimit = Math.max(1, (installRect().y() - 2 - entryTop) / 10);
-        refreshParamChanges(selectedCandidate());
         drawPropertyColumn(graphics, columnX, columnWidth, entryTop, entryLimit, pros, GOOD);
         drawPropertyColumn(graphics, rightColumnX, columnWidth, entryTop, entryLimit, cons, BAD);
         drawParamChanges(graphics, deltaColumnX, columnWidth, entryTop, entryLimit);
@@ -2122,48 +2167,23 @@ public class ZtRefitScreen extends GunRefitScreen {
     }
 
     /**
-     * 变化列（第三列）：把"装上前"与"装上后"两张参数卡按同一顺序逐行比，只留显示值变了的行
+     * 变化列（第三列）的内容：把"装上前"与"装上后"两张参数卡按同一顺序逐行比，只留显示值变了的行
      * （issue #7：固定顺序、没变化的不出现、绝对双值、不画条形）。
      *
-     * <p>重算只在"枪 + NBT + 候选件"三元组变了的时候发生 —— 一次重算要跑两次
-     * {@link AttachmentDataUtils} 全量遍历与一次 {@code eval}，不能每帧来（issue #9 的细则 3）。</p>
+     * <p>调用方是 {@link #refreshPreview()} —— 它负责"要不要重算"（一次重算要跑两次
+     * {@link AttachmentDataUtils} 全量遍历与一次 {@code eval}，不能每帧来）。</p>
      */
-    private void refreshParamChanges(@Nullable Candidate preview) {
-        if (preview == null || preview.compat() != Compat.OK) {
-            infoExtra.clear();
-            deltaScroll = 0;
-            deltaGunId = null;
-            deltaGunTag = null;
-            deltaItemId = null;
-            return;
-        }
+    private void computeParamChanges(Candidate preview, ItemStack gun, IGun iGun) {
         // 第二列可能还没为"当前这把枪"重建过（概览态才画卡，切槽后枪可能已经变样）：
         // buildGunInfo 自带 枪 id + NBT 缓存，命中就什么都不做。
         buildGunInfo();
         if (infoRows.isEmpty()) {
             return;
         }
-        ItemStack gun = gunStack();
-        IGun iGun = IGun.getIGunOrNull(gun);
-        if (iGun == null) {
-            return;
-        }
         CommonGunIndex index = TimelessAPI.getCommonGunIndex(iGun.getGunId(gun)).orElse(null);
         if (index == null) {
             return;
         }
-        IAttachment iAttachment = IAttachment.getIAttachmentOrNull(preview.stack());
-        ResourceLocation itemId = iAttachment == null ? null : iAttachment.getAttachmentId(preview.stack());
-        ResourceLocation gunId = iGun.getGunId(gun);
-        CompoundTag tag = gun.getTag();
-        if (gunId.equals(deltaGunId) && Objects.equals(deltaGunTag, tag)
-                && Objects.equals(deltaItemId, itemId)) {
-            return;
-        }
-        deltaGunId = gunId;
-        deltaGunTag = tag == null ? null : tag.copy();
-        deltaItemId = itemId;
-        deltaScroll = 0;
         // 装到克隆栈上算，不碰手上那把枪（与 measureImprovement、虚拟装配同一条路子）
         ItemStack modified = gun.copy();
         iGun.installAttachment(modified, preview.stack());
@@ -2273,15 +2293,23 @@ public class ZtRefitScreen extends GunRefitScreen {
      * 换配件时滚动回到顶部（用名字 + 下标当键，换槽位由 {@link #init()} 归零）。</p>
      */
     private void drawAttachmentInfo(GuiGraphics graphics, int x, int y, int columnWidth) {
-        ItemStack candidate = candidates.get(Math.min(selected, candidates.size() - 1)).stack();
-        String key = nameOf(candidate) + "@" + selected;
+        Candidate entry = previewCandidate();
+        if (entry == null) {
+            return;
+        }
+        ItemStack candidate = entry.stack();
+        String key = nameOf(candidate) + "@" + entry.invSlot() + "@" + entry.compat();
         if (!key.equals(attachKey)) {
             attachKey = key;
             attachScroll = 0;
         }
-        String blocked = blockedKey(candidates.get(Math.min(selected, candidates.size() - 1)).compat());
+        String blocked = blockedKey(entry.compat());
         List<Component> lines = new ArrayList<>();
         lines.add(Component.literal(nameOf(candidate)).withStyle(ChatFormatting.AQUA));
+        // issue #9 的细则 1：必须标出"预览：<件名>"。3D 能自证（枪上真多了个瞄具），数字不能；
+        // 而游戏里"数值变了"的默认解释是"已经生效"，最坏的误解是以为装上了、关掉界面才发现白高兴。
+        lines.add(Component.literal(I18n.get("gui.z_tweaks.refit.preview", nameOf(candidate)))
+                .withStyle(ChatFormatting.YELLOW));
         if (blocked != null) {
             // 不可安装的件在这一列只讲"这是什么"与"为什么装不上"（与行内角标同一串字）；
             // Pros/Cons 与参数不给 —— 见 computeProsCons。

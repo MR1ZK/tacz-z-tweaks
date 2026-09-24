@@ -61,6 +61,7 @@
   "gui.z_tweaks.refit.stat.head_shot": "爆头倍率",
 
   "gui.z_tweaks.refit.candidate": "候选：%s",
+  "gui.z_tweaks.refit.preview": "预览：%s（未安装）",
   "gui.z_tweaks.refit.slot.scope": "瞄具",
   "gui.z_tweaks.refit.slot.muzzle": "枪口",
   "gui.z_tweaks.refit.slot.stock": "枪托",

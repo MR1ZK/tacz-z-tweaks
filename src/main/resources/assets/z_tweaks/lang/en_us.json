@@ -61,6 +61,7 @@
   "gui.z_tweaks.refit.stat.head_shot": "Headshot",
 
   "gui.z_tweaks.refit.candidate": "candidate: %s",
+  "gui.z_tweaks.refit.preview": "Preview: %s (not installed)",
   "gui.z_tweaks.refit.slot.scope": "Scope",
   "gui.z_tweaks.refit.slot.muzzle": "Muzzle",
   "gui.z_tweaks.refit.slot.stock": "Stock",
