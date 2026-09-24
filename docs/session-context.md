@@ -7,7 +7,7 @@
 **TACZ: Z-Tweaks** —— Forge 1.20.1 客户端模组，用自绘 GUI 接管 TACZ（Timeless & Classics Guns）的改装界面（Z 键），提供更好的武器预览、更简单的改装流程、更易读的参数。对标 Garry's Mod 的 ARC-9。GPL-3.0。
 
 - 仓库：`github.com/MR1ZK/tacz-z-tweaks`，`main` 分支
-- 已发布：**v0.1.1-hotfix1**（Latest，tag 即 v0.1.1-hotfix1）；上一版正式 release 是 v0.1.1
+- 已发布：**v0.1.3**（Latest，2026-09-25，附 `z_tweaks-1.20.1-0.1.3.jar`）；此前依次是 v0.1.2 / v0.1.1-hotfix1 / v0.1.1 / v0.1.0
 - 定位：原型（throwaway）阶段，M0–M2 完成、M3 部分完成，UI 仍按试玩反馈调整
 - **动功能之前先读[路线图](https://github.com/MR1ZK/tacz-z-tweaks/issues/1)**：一次 wayfinder 寻路留下的决策地图（1 张地图 + 16 张票），每个待做的功能都有一张票承载它的决策、取舍与依赖。**地图已于 2026-09-25 归档**（目的地达成、frontier 空）：16 张子票全部有结论 —— 12 解决 / 3 推迟 / 1 否决；推迟的是 #11（TACZ 版本下限与兼容策略）、#13（内部 API 适配层 compat/）、#15（一键拆空），否决的是 #14（瞄具变焦档位做成界面可选），**已解决的决策不因归档而失效**。开工前的规划稿在 `docs/refit-plus-plan.md`（已标注哪几节作废），三份调研在 `docs/research/`
 
@@ -16,7 +16,7 @@
 - 需要 `libs/tacz-1.20.1-1.1.8-hotfix.jar`（TACZ 本体，不入库）
 - `./gradlew build` / `./gradlew runClient`
 - 提交用 `git -c user.name=MR1ZK -c user.email=...noreply.github.com`（**仓库没配 git 身份**，别改全局 config）
-- 发布流程：改代码 → build → commit → `git tag -f v0.x.y` 强移标签 → `gh release upload <tag> <jar> --clobber` + `gh release edit --notes`
+- 发布流程（v0.1.3 实走的那条）：改 `gradle.properties` 的 `mod_version` → `./gradlew build` → commit + `git push origin main` → `git tag v0.x.y` + `git push origin v0.x.y` → `gh release create v0.x.y --title "Z-Tweaks 0.x.y" --notes-file <文件> build/libs/<jar>`（说明照上一版格式写）。复用版本号时才需要 `git tag -f` 强移 + `--clobber`；**说明必须走 `--notes-file`** —— PowerShell 下多行 `--notes` 会被拆成多个参数
 
 ## 架构要点
 
