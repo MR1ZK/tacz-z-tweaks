@@ -88,6 +88,23 @@ public class ZtRefitScreen extends GunRefitScreen {
     /** 搜索框右侧的排序按钮宽度，以及它与搜索框之间的缝。 */
     private static final int SORT_W = 58;
     private static final int SORT_GAP = 4;
+    /**
+     * 排序键的编码：0/1 是名称 / 模组，其余 = {@link StatCatalog#SORTABLE} 的下标 + {@link #SORT_STAT_BASE}。
+     * 用一个 int 装下"字段排序"与"参数排序"两种东西，比较器里就只分两支。
+     */
+    private static final int SORT_NAME = 0;
+    private static final int SORT_MOD = 1;
+    private static final int SORT_STAT_BASE = 2;
+    /** 排序 / 筛选弹出层：宽度、行高，以及分隔条另算的高度。 */
+    private static final int MENU_W = 132;
+    private static final int MENU_ROW_H = 11;
+    private static final int MENU_PAD = 4;
+    private static final int MENU_SEP_H = 4;
+    /** 弹出层里的两个"非排序项"行，与"这一下点空了"的返回值。 */
+    private static final int MENU_DIR = -1;
+    private static final int MENU_FILTER = -2;
+    private static final int MENU_SEP = -3;
+    private static final int MENU_NONE = -4;
     /** 双击阈值，与 MC 原生 AbstractContainerScreen 一致。 */
     private static final long DOUBLE_CLICK_MS = 250L;
     /**
@@ -138,11 +155,16 @@ public class ZtRefitScreen extends GunRefitScreen {
     private String searchQuery = "";
 
     /**
-     * 候选列表排序偏好：按名称还是按模组、正序还是倒序。
+     * 候选列表排序偏好：{@link #SORT_NAME} / {@link #SORT_MOD} / 某个参数。
      * 切槽位<b>不</b>清空 —— 排序是玩家的全局习惯，不是某个槽位的属性（与搜索词相反）。
      */
-    private SortField sortField = SortField.NAME;
-    private boolean sortAscending = true;
+    private int sortKey = SORT_NAME;
+    /** 方向：true = 优→劣。名称/模组这两项没有"优劣"可言，就是 A-Z / Z-A。 */
+    private boolean sortBestFirst = true;
+    /** 筛选：只看对该参数有改善的配件。只对参数排序有意义，名称/模组下那一行置灰。 */
+    private boolean onlyImproving = false;
+    /** 排序 / 筛选弹出层是否展开。它是底部那一行唯一的排序入口。 */
+    private boolean sortMenuOpen = false;
 
     /** 上一次点击候选条目的时间戳 / 下标 / 鼠标键，用于双击判定。 */
     private long lastRowClickTime = 0L;
@@ -182,6 +204,9 @@ public class ZtRefitScreen extends GunRefitScreen {
         // 原型：不调用 super.init()，全部自绘。
         this.clearWidgets();
         this.invalidateCandidates();
+        // 弹出层跟着关：init() 会被切槽位与服务端刷新（装/卸完成后）触发，
+        // 此时底下的列表已经换了一批，留着旧菜单容易点到不存在的内容。
+        this.sortMenuOpen = false;
         this.hoveredRow = -1;
         this.lastRowClickTime = 0L;
         this.lastRowClickIndex = -1;
@@ -240,37 +265,147 @@ public class ZtRefitScreen extends GunRefitScreen {
     }
 
     /**
-     * 循环切换排序：名称 A-Z → 名称 Z-A → 模组 A-Z → 模组 Z-A → 名称 A-Z。
+     * 弹出层自上而下的行：名称 / 模组 / 十个参数项 / 方向 / 筛选。
      *
-     * <p>用一个按钮装下四种状态，比"字段 + 方向两个按钮"省一半宽度（候选面板只有
-     * {@link #LIST_W} 宽，还要和搜索框挤同一行）。当前状态直接写在按钮上，鼠标悬停有提示。</p>
+     * <p>静态建一次 —— 它每帧都要被绘制与命中检测各走一遍，没必要每帧重建。</p>
+     */
+    private static final List<Integer> SORT_MENU_ROWS = buildSortMenuRows();
+
+    private static List<Integer> buildSortMenuRows() {
+        List<Integer> rows = new ArrayList<>();
+        rows.add(SORT_NAME);
+        rows.add(SORT_MOD);
+        rows.add(MENU_SEP);
+        for (int i = 0; i < StatCatalog.SORTABLE.size(); i++) {
+            rows.add(SORT_STAT_BASE + i);
+        }
+        rows.add(MENU_SEP);
+        rows.add(MENU_DIR);
+        rows.add(MENU_FILTER);
+        return List.copyOf(rows);
+    }
+
+    /** 当前排序键对应的参数项；名称 / 模组时返回 null。 */
+    @Nullable
+    private StatCatalog.StatDef selectedStat() {
+        return statOf(sortKey);
+    }
+
+    @Nullable
+    private static StatCatalog.StatDef statOf(int key) {
+        int index = key - SORT_STAT_BASE;
+        return index >= 0 && index < StatCatalog.SORTABLE.size() ? StatCatalog.SORTABLE.get(index) : null;
+    }
+
+    /**
+     * 改排序键。
      *
-     * <p>改完把 {@code cachedType} 置空触发下一帧重建 —— 候选列表按槽位类型缓存，
+     * <p>改完必须把 {@code cachedType} 置空触发下一帧重建 —— 候选列表按槽位类型缓存，
      * 不置空的话排序不会立即生效。</p>
      */
-    private void cycleSort() {
-        if (sortField == SortField.NAME) {
-            if (sortAscending) {
-                sortAscending = false;
-            } else {
-                sortField = SortField.MOD;
-                sortAscending = true;
-            }
-        } else {
-            if (sortAscending) {
-                sortAscending = false;
-            } else {
-                sortField = SortField.NAME;
-                sortAscending = true;
-            }
-        }
+    private void selectSortKey(int key) {
+        sortKey = key;
         invalidateCandidates();
     }
 
-    /** 排序按钮上的文字：字段 + 方向，取 lang（如"名称 A-Z" / "Mod Z-A"）。 */
+    private void toggleSortDirection() {
+        sortBestFirst = !sortBestFirst;
+        invalidateCandidates();
+    }
+
+    private void toggleImprovingFilter() {
+        onlyImproving = !onlyImproving;
+        invalidateCandidates();
+    }
+
+    /** 排序按钮上的文字：名称/模组沿用 A-Z / Z-A，参数项写成"后坐力 优→劣"。 */
     private String sortLabel() {
-        return I18n.get("gui.z_tweaks.refit.sort." + sortField.name().toLowerCase(Locale.ROOT)
-                + (sortAscending ? ".asc" : ".desc"));
+        if (sortKey == SORT_NAME || sortKey == SORT_MOD) {
+            String field = sortKey == SORT_NAME ? "name" : "mod";
+            return I18n.get("gui.z_tweaks.refit.sort." + field + (sortBestFirst ? ".asc" : ".desc"));
+        }
+        StatCatalog.StatDef stat = selectedStat();
+        String name = stat == null ? "" : I18n.get(stat.langKey());
+        return I18n.get("gui.z_tweaks.refit.sort.stat", name,
+                I18n.get("gui.z_tweaks.refit.sort." + (sortBestFirst ? "best" : "worst")));
+    }
+
+    /** 弹出层一行的文字。方向行与筛选行把当前状态写在冒号后面，不另占控件。 */
+    private String sortMenuLabel(int key) {
+        if (key == SORT_NAME) {
+            return I18n.get("gui.z_tweaks.refit.sort.key.name");
+        }
+        if (key == SORT_MOD) {
+            return I18n.get("gui.z_tweaks.refit.sort.key.mod");
+        }
+        if (key == MENU_DIR) {
+            return I18n.get("gui.z_tweaks.refit.sort.dir",
+                    I18n.get("gui.z_tweaks.refit.sort." + (sortBestFirst ? "best" : "worst")));
+        }
+        if (key == MENU_FILTER) {
+            return I18n.get("gui.z_tweaks.refit.sort.filter",
+                    I18n.get("gui.z_tweaks.refit.sort.filter." + (onlyImproving ? "on" : "off")));
+        }
+        StatCatalog.StatDef stat = statOf(key);
+        return stat == null ? "" : I18n.get(stat.langKey());
+    }
+
+    /** 该行是不是"当前选中的排序键"。方向行 / 筛选行不是选项，永远不高亮。 */
+    private boolean isSortKeyActive(int key) {
+        return key >= SORT_NAME && key == sortKey;
+    }
+
+    /**
+     * 筛选只在参数排序下有意义：名称 / 模组没有"改善"可言。
+     * 这一行此时置灰并忽略点击 —— 与其藏起来让弹出层高度跳变，不如留着位置。
+     */
+    private boolean filterAvailable() {
+        return selectedStat() != null;
+    }
+
+    /**
+     * 弹出层矩形：右对齐贴在排序按钮上方，向上展开。
+     *
+     * <p>往候选面板内侧长，是因为底部那一行已经塞满（搜索框 120 + 间隙 4 + 排序按钮 58 = 182，
+     * 而面板内宽只有 182），既没地方放第二个按钮，也不该为它加宽面板。</p>
+     */
+    private Rect sortMenuRect() {
+        int height = MENU_PAD * 2;
+        for (int key : SORT_MENU_ROWS) {
+            height += key == MENU_SEP ? MENU_SEP_H : MENU_ROW_H;
+        }
+        Rect sort = sortRect();
+        return new Rect(sort.x() + sort.w() - MENU_W, footerY(listRect()) - height - 2, MENU_W, height);
+    }
+
+    /** 弹出层里 y 坐标落在哪一行；落在内边距或分隔条上返回 {@link #MENU_NONE} / {@link #MENU_SEP}。 */
+    private int sortMenuKeyAt(double mouseX, double mouseY) {
+        Rect menu = sortMenuRect();
+        if (!menu.contains(mouseX, mouseY)) {
+            return MENU_NONE;
+        }
+        int y = menu.y() + MENU_PAD;
+        for (int key : SORT_MENU_ROWS) {
+            int height = key == MENU_SEP ? MENU_SEP_H : MENU_ROW_H;
+            if (mouseY < y + height) {
+                return key;
+            }
+            y += height;
+        }
+        return MENU_NONE;
+    }
+
+    /** 点在弹出层的某一行上：排序项 = 选它，方向行 / 筛选行 = 翻转。 */
+    private void clickSortMenu(int key) {
+        if (key == MENU_DIR) {
+            toggleSortDirection();
+        } else if (key == MENU_FILTER) {
+            if (filterAvailable()) {
+                toggleImprovingFilter();
+            }
+        } else {
+            selectSortKey(key);
+        }
     }
 
     /**
@@ -368,6 +503,20 @@ public class ZtRefitScreen extends GunRefitScreen {
             return;
         }
         cachedType = type;
+        // 参数排序 / 筛选才需要逐候选跑一次属性求值。名称/模组排序下这一整段都不执行，
+        // 一分钱不花。
+        StatCatalog.StatDef stat = selectedStat();
+        GunData gunData = null;
+        AttachmentCacheProperty base = null;
+        if (stat != null) {
+            gunData = TimelessAPI.getCommonGunIndex(iGun.getGunId(gun))
+                    .map(CommonGunIndex::getGunData).orElse(null);
+            base = baseCache(gun, gunData);
+            if (base == null) {
+                // 枪械数据缺失或畸形：这一轮退化成"没有参数排序"，界面照常。
+                stat = null;
+            }
+        }
         List<Map.Entry<ResourceLocation, CommonAttachmentIndex>> all =
                 new ArrayList<>(TimelessAPI.getAllCommonAttachmentIndex());
         Inventory inventory = player.getInventory();
@@ -389,7 +538,13 @@ public class ZtRefitScreen extends GunRefitScreen {
             if (invSlot < 0 && !player.isCreative()) {
                 continue;
             }
-            found.add(new Candidate(stack, invSlot, nameOf(stack), entry.getKey().getNamespace()));
+            double improvement = stat == null ? 0 : measureImprovement(stat, gun, iGun, gunData, base, stack);
+            // 筛选：只看比"现在装着的"更好的。刻意不区分是否拥有 —— 拥有性是生存/创造规则的
+            // 职责（上面那一行已经在管），在这里再滤一次只会让创造模式下的列表行为变得难以解释。
+            if (stat != null && onlyImproving && improvement <= 0) {
+                continue;
+            }
+            found.add(new Candidate(stack, invSlot, nameOf(stack), entry.getKey().getNamespace(), improvement));
         }
         found.sort(candidateComparator());
         candidates.clear();
@@ -407,16 +562,73 @@ public class ZtRefitScreen extends GunRefitScreen {
      * 就只剩背包里的，这一层退化成空操作。</p>
      */
     private Comparator<Candidate> candidateComparator() {
-        Comparator<Candidate> byField = switch (sortField) {
-            case NAME -> Comparator.comparing((Candidate c) -> c.name().toLowerCase(Locale.ROOT))
+        Comparator<Candidate> byField;
+        if (sortKey == SORT_NAME) {
+            byField = Comparator.comparing((Candidate c) -> c.name().toLowerCase(Locale.ROOT))
                     .thenComparing(c -> c.modId().toLowerCase(Locale.ROOT));
-            case MOD -> Comparator.comparing((Candidate c) -> c.modId().toLowerCase(Locale.ROOT))
+        } else if (sortKey == SORT_MOD) {
+            byField = Comparator.comparing((Candidate c) -> c.modId().toLowerCase(Locale.ROOT))
                     .thenComparing(c -> c.name().toLowerCase(Locale.ROOT));
-        };
-        if (!sortAscending) {
+        } else {
+            // 参数排序：improvement 已经是"越大越好"（见 StatCatalog），所以方向开关对参数项
+            // 也是同向的"优→劣 / 劣→优"，不需要再按 positivelyBetter 分情况。
+            // 同分按名字兜底：否则连续两帧重建（切槽位、改搜索）可能给出不同顺序，看着像抖动。
+            byField = Comparator.comparingDouble((Candidate c) -> c.improvement())
+                    .thenComparing(c -> c.name().toLowerCase(Locale.ROOT));
+        }
+        if (!sortBestFirst) {
             byField = byField.reversed();
         }
         return Comparator.comparingInt((Candidate c) -> c.invSlot() >= 0 ? 0 : 1).thenComparing(byField);
+    }
+
+    /**
+     * 当前枪械状态的属性缓存，作为"改善量"的对比基准。
+     *
+     * <p>整轮列表重建只跑这一次 —— 每个候选各跑一次就已经够了（它们共享同一把枪、
+     * 只是换掉同一个槽位）。</p>
+     *
+     * <p>包在 try 里：{@link AttachmentCacheProperty#eval} 会把全部 16 个 modifier 都算一遍，
+     * 枪包里任何一项数据畸形（例如后坐力曲线缺帧）都会在这里抛 NPE。那是数据问题，
+     * 不该把界面带崩 —— 返回 null，调用方退化成"这一轮没有参数排序"。</p>
+     */
+    @Nullable
+    private static AttachmentCacheProperty baseCache(ItemStack gun, @Nullable GunData gunData) {
+        if (gunData == null) {
+            return null;
+        }
+        try {
+            AttachmentCacheProperty cache = new AttachmentCacheProperty();
+            cache.eval(gun, gunData);
+            return cache;
+        } catch (Exception e) {
+            return null;
+        }
+    }
+
+    /**
+     * 量"这个候选件装上之后"对该参数的**边际**改善量（正数 = 比现在装着的强）。
+     *
+     * <p>克隆枪栈 + 在内存里装件 + 求值，不落 NBT、不发 packet（与虚拟装配同一条路子）。
+     * 代价说明：{@code eval} 会遍历枪上全部配件槽把 16 个 modifier 重算一遍，TACZ 类注释
+     * 写明"不应该频繁调用"——所以它只在列表重建时跑（切槽位 / 改搜索 / 改排序），不是每帧。</p>
+     *
+     * <p>为什么不直接用 {@link StatCatalog#read} 的绝对值当改善量：那量的是"相对裸枪"，
+     * 会把"比裸枪好、但不如当前已装件"的候选也算成改善。要的是"比现在更好"，
+     * 所以拿装前装后两份 cache 相减。</p>
+     */
+    private static double measureImprovement(StatCatalog.StatDef stat, ItemStack gun, IGun iGun,
+                                             GunData gunData, AttachmentCacheProperty base,
+                                             ItemStack candidate) {
+        try {
+            ItemStack modified = gun.copy();
+            iGun.installAttachment(modified, candidate);
+            AttachmentCacheProperty after = new AttachmentCacheProperty();
+            after.eval(modified, gunData);
+            return StatCatalog.marginal(stat, modified, gunData, base, after);
+        } catch (Exception e) {
+            return 0;
+        }
     }
 
     /** 搜索匹配：本地化后的显示名，大小写不敏感的子串。玩家搜的是眼睛看到的名字。 */
@@ -845,24 +1057,65 @@ public class ZtRefitScreen extends GunRefitScreen {
             searchBox.render(graphics, mouseX, mouseY, partialTick);
         }
         drawSortButton(graphics, mouseX, mouseY);
+        if (sortMenuOpen && candidateListVisible()) {
+            drawSortMenu(graphics, mouseX, mouseY);
+        }
     }
 
     /**
-     * 底部这一行右侧的排序按钮：显示当前排序方式（如"名称 A-Z"），点击循环切换。
+     * 底部这一行右侧的排序按钮：显示当前排序方式（如"后坐力 优→劣"），点击展开排序 / 筛选层。
      *
      * <p>自绘而非用 {@link ZtUi#button}：那个 helper 是安装/卸下的绿红语义（primary/secondary），
      * 排序是中性控件，套上去会让人误以为它是个"确认/取消"。观感对齐同一行的搜索框。</p>
+     *
+     * <p>弹出层展开期间按钮保持"按下"的样子，让玩家看得出这层是从哪冒出来的。</p>
      */
     private void drawSortButton(GuiGraphics graphics, int mouseX, int mouseY) {
         Rect rect = sortRect();
         boolean hovered = !dragging && rect.contains(mouseX, mouseY);
-        roundedFill(graphics, rect.x(), rect.y(), rect.w(), rect.h(), hovered ? 0x40FFFFFF : 0x40000000);
-        roundedBorder(graphics, rect.x(), rect.y(), rect.w(), rect.h(), hovered ? 0x88FFFFFF : HAIRLINE);
+        boolean active = hovered || sortMenuOpen;
+        roundedFill(graphics, rect.x(), rect.y(), rect.w(), rect.h(), active ? 0x40FFFFFF : 0x40000000);
+        roundedBorder(graphics, rect.x(), rect.y(), rect.w(), rect.h(), active ? 0x88FFFFFF : HAIRLINE);
         graphics.drawCenteredString(this.font, truncate(sortLabel(), rect.w() - 6),
-                rect.x() + rect.w() / 2, rect.y() + 2, hovered ? TEXT : TEXT_DIM);
+                rect.x() + rect.w() / 2, rect.y() + 2, active ? TEXT : TEXT_DIM);
         if (hovered) {
             tooltip(Component.literal(I18n.get("gui.z_tweaks.refit.sort.tooltip")),
                     (int) mouseX, (int) mouseY);
+        }
+    }
+
+    /**
+     * 排序 / 筛选弹出层。
+     *
+     * <p>画在候选列表之上、最后一层，所以关闭前它会盖住列表下缘 —— 这也是它展开时
+     * 点击必须优先被它吃掉的原因（见 {@code mouseClicked}）。</p>
+     */
+    private void drawSortMenu(GuiGraphics graphics, int mouseX, int mouseY) {
+        Rect menu = sortMenuRect();
+        roundedFill(graphics, menu.x(), menu.y(), menu.w(), menu.h(), 0xF0101010);
+        roundedBorder(graphics, menu.x(), menu.y(), menu.w(), menu.h(), 0x88FFFFFF);
+        boolean inside = menu.contains(mouseX, mouseY);
+        int y = menu.y() + MENU_PAD;
+        for (int key : SORT_MENU_ROWS) {
+            int height = key == MENU_SEP ? MENU_SEP_H : MENU_ROW_H;
+            if (key == MENU_SEP) {
+                graphics.fill(menu.x() + 4, y + 1, menu.x() + menu.w() - 4, y + 2, HAIRLINE);
+            } else {
+                boolean hovered = inside && mouseY >= y && mouseY < y + height;
+                // 不可用的行（没选参数时的筛选开关）画得更暗，但保留位置，避免展开高度跳变
+                boolean usable = key != MENU_FILTER || filterAvailable();
+                boolean selected = isSortKeyActive(key);
+                int color = selected ? ACCENT : (hovered ? TEXT : TEXT_DIM);
+                if (hovered && usable) {
+                    roundedFill(graphics, menu.x() + 2, y, menu.w() - 4, height, 0x20FFFFFF);
+                }
+                graphics.drawString(this.font, truncate(sortMenuLabel(key), menu.w() - 22),
+                        menu.x() + 8, y + 2, usable ? color : TEXT_MUTED, false);
+                if (selected) {
+                    graphics.drawString(this.font, "•", menu.x() + menu.w() - 10, y + 2, ACCENT, false);
+                }
+            }
+            y += height;
         }
     }
 
@@ -1067,6 +1320,20 @@ public class ZtRefitScreen extends GunRefitScreen {
                 return true;
             }
         }
+        // 排序 / 筛选弹出层：它盖在候选列表之上，所以判定必须排在列表行之前 —— 否则点弹出层里
+        // 的一行会顺带把底下那行的配件选中、甚至触发双击装上。
+        if (sortMenuOpen) {
+            if (candidateListVisible()) {
+                int key = sortMenuKeyAt(mouseX, mouseY);
+                if (key != MENU_NONE && key != MENU_SEP) {
+                    clickSortMenu(key);
+                    return true;
+                }
+            }
+            // 点别处 = 收起。这一下照样吃掉：不穿透给下面的列表，避免"想关菜单却装了个配件"。
+            sortMenuOpen = false;
+            return true;
+        }
         // 候选列表（几何与绘制同源：rowRect）。概览态框不画，点击自然也不该命中
         if (candidateListVisible()) {
             Rect list = listRect();
@@ -1094,9 +1361,10 @@ public class ZtRefitScreen extends GunRefitScreen {
                 }
             }
         }
-        // 排序按钮：与搜索框同一行，只在候选框可见时存在（几何与绘制同源：sortRect）
+        // 排序按钮：与搜索框同一行，只在候选框可见时存在（几何与绘制同源：sortRect）。
+        // 点它只负责开合弹出层 —— 排序键、方向、筛选全在那层里选，按钮不再循环切换。
         if (candidateListVisible() && sortRect().contains(mouseX, mouseY)) {
-            cycleSort();
+            sortMenuOpen = !sortMenuOpen;
             return true;
         }
         // 详情条按钮
@@ -1155,6 +1423,10 @@ public class ZtRefitScreen extends GunRefitScreen {
 
     @Override
     public boolean mouseScrolled(double mouseX, double mouseY, double delta) {
+        // 弹出层展开时，指针落在它上面就吃掉滚轮：底下列表跟着滚，会让人分不清自己在滚哪一层
+        if (sortMenuOpen && sortMenuRect().contains(mouseX, mouseY)) {
+            return true;
+        }
         // 指针在候选面板内（但不在底部搜索框 / 排序按钮上）才翻列表，其余位置一律给相机缩放
         if (candidateListVisible() && listRect().contains(mouseX, mouseY)
                 && !searchRect().contains(mouseX, mouseY) && !sortRect().contains(mouseX, mouseY)) {
@@ -1320,15 +1592,13 @@ public class ZtRefitScreen extends GunRefitScreen {
 
     // ---------------------------------------------------------------- 小工具
 
-    /** 排序字段：按显示名，还是按模组（配件 id 的命名空间，即定义它的枪包/mod）。 */
-    private enum SortField {NAME, MOD}
-
     /**
      * 候选列表里一行所需的全部信息（列表本身就是一份 {@code List<Candidate>}，不再拆成平行列表），
      * 在 {@link #rebuildCandidates()} 里一次性算好：名字（本地化显示名，排序与绘制共用，
-     * 避免每行重复查索引）、模组命名空间，以及它在背包里的槽位（-1 = 背包里没有）。
+     * 避免每行重复查索引）、模组命名空间、它在背包里的槽位（-1 = 背包里没有），
+     * 以及它对该参数的边际改善量（只在参数排序 / 筛选时算，见 {@link StatCatalog}）。
      */
-    private record Candidate(ItemStack stack, int invSlot, String name, String modId) {
+    private record Candidate(ItemStack stack, int invSlot, String name, String modId, double improvement) {
     }
 
     /**
