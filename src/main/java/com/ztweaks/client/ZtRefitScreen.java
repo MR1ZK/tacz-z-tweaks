@@ -28,6 +28,7 @@ import com.tacz.guns.resource.CommonAssetsManager;
 import com.tacz.guns.resource.index.CommonAttachmentIndex;
 import com.tacz.guns.resource.index.CommonGunIndex;
 import com.tacz.guns.resource.pojo.data.attachment.AttachmentData;
+import com.tacz.guns.resource.pojo.data.gun.Bolt;
 import com.tacz.guns.resource.pojo.data.gun.GunData;
 import com.tacz.guns.sound.SoundManager;
 import com.ztweaks.config.ZtConfig;
@@ -175,10 +176,15 @@ public class ZtRefitScreen extends GunRefitScreen {
     private int lastRowClickIndex = -1;
     private int lastRowClickButton = -1;
 
-    /** 信息卡三列：名字+描述 / 参数 / 补充（第三列暂空，留给以后加数据）。 */
+    /** 信息卡三列：名字+描述 / 参数（当前值） / 参数（变化项）。 */
     private final List<Component> infoMain = new ArrayList<>();
     private final List<Component> infoStats = new ArrayList<>();
     private final List<Component> infoExtra = new ArrayList<>();
+    /**
+     * 第二列那张表的原始行（{@link ParamRow}）：第三列按同一顺序挑出"值不一样的行"，
+     * 两列因此不会各算一套，也不会顺序对不上（issue #7/#8）。
+     */
+    private List<ParamRow> infoRows = new ArrayList<>();
     /** 各列独立滚动的偏移量，以及上一帧算出的各列行数（用来夹取偏移）。 */
     private final int[] infoScroll = new int[INFO_COLUMNS];
     private int[] infoColumnLines = new int[INFO_COLUMNS];
@@ -1877,6 +1883,7 @@ public class ZtRefitScreen extends GunRefitScreen {
             infoMain.clear();
             infoStats.clear();
             infoExtra.clear();
+            infoRows.clear();
             gunInfoId = null;
             gunInfoTag = null;
             return;
@@ -1914,57 +1921,160 @@ public class ZtRefitScreen extends GunRefitScreen {
             }
         }
 
-        // 第二列：参数。口径只留文字 —— 弹药图标和弹容在改装界面里由 HUD 管
-        infoStats.add(Component.literal(AmmoItemBuilder.create().setId(gunData.getAmmoId()).build()
-                .getHoverName().getString()).withStyle(ChatFormatting.GRAY));
+        // 第二列：参数卡。所有可比行都出自同一张 {@link #paramRows} 表 —— 顺序固定，
+        // 第三列（变化项）按同一顺序挑"不一样的行"，两列口径同源，不会出现"上面写 12.5、
+        // 下面按另一个口径比"（issue #7/#8）。
+        infoRows = paramRows(gun, iGun, gunData, index, baseCache(gun, gunData));
+        for (ParamRow row : infoRows) {
+            infoStats.add(row.line());
+        }
+        // 第三列：变化项。由候选件的预览驱动（issue #7 的形态、#9 的悬停驱动），
+        // 没预览时是空的 —— 空列比"显示一堆没变的数"干净。
+    }
+
+    /**
+     * 参数卡里可比的一行。
+     *
+     * <p>{@code key} 是 TACZ 的 lang key：{@code wholeLine} 为真时它是整行模板（数值包在 key 里，
+     * 如 {@code "%s 原版护甲穿透"}，拆不出标签与数值两段），为假时它是标签；{@code null} =
+     * 这一行只有值没有标签（弹药口径）。</p>
+     *
+     * <p>两种形态都要能在变化列里渲染成「旧 → 新」，所以整行模板那一类必须留着模板本身 ——
+     * 只存"渲染好的字符串"就没法把新值塞回去了。</p>
+     */
+    private record ParamRow(@Nullable String key, boolean wholeLine, String value, ChatFormatting valueFormat) {
+
+        /** 参数卡（第二列）里的样子：标签灰 + 数值白。 */
+        Component line() {
+            Component v = Component.literal(value).withStyle(valueFormat);
+            if (key == null) {
+                return v;
+            }
+            return wholeLine ? Component.translatable(key, v) : label().append(v);
+        }
+
+        /** 变化列（第三列）里的样子：标签不变，数值换成「旧 → 新」。 */
+        Component changeLine(String before) {
+            Component pair = Component.literal(before).withStyle(ChatFormatting.DARK_GRAY)
+                    .append(Component.literal(" → ").withStyle(ChatFormatting.GRAY))
+                    .append(Component.literal(value).withStyle(valueFormat));
+            if (key == null) {
+                return pair;
+            }
+            return wholeLine ? Component.translatable(key, pair) : label().append(pair);
+        }
+
+        /**
+         * TACZ 的标签 key 有的自带冒号（{@code 伤害: }）、有的不带（{@code 射速}）。
+         * 参数卡统一是"标签：值"的写法，所以不带的补一个中英通用的 {@code ": "} ——
+         * TACZ 的文案本身一个字不改。
+         */
+        private MutableComponent label() {
+            String text = I18n.get(key);
+            boolean hasSeparator = text.endsWith(":") || text.endsWith("：");
+            return Component.literal(hasSeparator ? text : text + ": ").withStyle(ChatFormatting.GRAY);
+        }
+    }
+
+    /**
+     * 参数卡的全部可比行，**顺序固定**（issue #7：宁可稳定也不要抖）。
+     *
+     * <p>现有项之后接 issue #8 定的六项，顺序照 TACZ 原生属性条：开火模式 → 弹匣容量 →
+     * 射速 → 弹速 → 穿透 → 开镜时间。文案复用 TACZ 的 lang key，数值格式对齐各修饰器的
+     * 成品串（{@code %drpm} / {@code %dm/s} / {@code %d} / {@code %.2fs}）。</p>
+     *
+     * <p>取数分两类：能含配件派生的走 {@link AttachmentDataUtils}（它自己遍历全部配件槽），
+     * 纯枪械属性的走 {@link IGun} / {@link GunData}；能用属性缓存的优先用缓存
+     * —— {@code eval} 一次拿到的就是"当前生效值"，含配件。</p>
+     */
+    private static List<ParamRow> paramRows(ItemStack gun, IGun iGun, GunData gunData, CommonGunIndex index,
+                                            @Nullable AttachmentCacheProperty cache) {
+        List<ParamRow> rows = new ArrayList<>();
+        rows.add(new ParamRow(null, false, AmmoItemBuilder.create().setId(gunData.getAmmoId()).build()
+                .getHoverName().getString(), ChatFormatting.GRAY));
 
         int level = iGun.getLevel(gun);
-        Component levelValue;
+        String levelText;
         if (level >= iGun.getMaxLevel()) {
-            levelValue = Component.literal(String.format("%d (MAX)", level)).withStyle(ChatFormatting.WHITE);
+            levelText = String.format("%d (MAX)", level);
         } else {
             int toNext = iGun.getExpToNextLevel(gun);
             int expCurrent = iGun.getExpCurrentLevel(gun);
             // TACZ 原式是 int 整除后再乘 100f，非满级时恒为 0.0%；这里改成浮点除法
             float percent = (toNext + expCurrent) == 0 ? 0f : expCurrent * 100f / (toNext + expCurrent);
-            levelValue = Component.literal(String.format("%d (%.1f%%)", level, percent))
-                    .withStyle(ChatFormatting.WHITE);
+            levelText = String.format("%d (%.1f%%)", level, percent);
         }
-        infoStats.add(labeled("tooltip.tacz.gun.level", levelValue));
-        infoStats.add(labeled("tooltip.tacz.gun.type",
-                Component.translatable("tacz.type." + index.getType() + ".name")
-                        .withStyle(ChatFormatting.WHITE)));
+        rows.add(new ParamRow("tooltip.tacz.gun.level", false, levelText, ChatFormatting.WHITE));
+        rows.add(new ParamRow("tooltip.tacz.gun.type", false,
+                I18n.get("tacz.type." + index.getType() + ".name"), ChatFormatting.WHITE));
 
-        MutableComponent damageValue = Component
-                .literal(DAMAGE_FORMAT.format(AttachmentDataUtils.getDamageWithAttachment(gun, gunData)))
-                .withStyle(ChatFormatting.WHITE);
+        String damage = DAMAGE_FORMAT.format(AttachmentDataUtils.getDamageWithAttachment(gun, gunData));
         ExplosionData explosion = gunData.getBulletData().getExplosionData();
         if (explosion != null
                 && (AttachmentDataUtils.isExplodeEnabled(gun, gunData) || explosion.isExplode())) {
-            damageValue.append(" + " + DAMAGE_FORMAT.format(
-                            explosion.getDamage() * SyncConfig.DAMAGE_BASE_MULTIPLIER.get()))
-                    .append(Component.translatable("tooltip.tacz.gun.explosion"));
+            damage += " + " + DAMAGE_FORMAT.format(explosion.getDamage() * SyncConfig.DAMAGE_BASE_MULTIPLIER.get())
+                    + I18n.get("tooltip.tacz.gun.explosion");
         }
-        infoStats.add(labeled("tooltip.tacz.gun.damage", damageValue));
+        rows.add(new ParamRow("tooltip.tacz.gun.damage", false, damage, ChatFormatting.WHITE));
 
-        // 这两行的文案把数值包在 key 里（"25% 原版护甲穿透"），拆不出标签/数值两段，
-        // 整行统一用灰；只有移动速度是负面数值，整行用红
+        // 这三行的文案把数值包在 key 里（"25% 原版护甲穿透"），整行只有一种色；
+        // 移动速度是负面数值，整行用红
         double armor = Mth.clamp(AttachmentDataUtils.getArmorIgnoreWithAttachment(gun, gunData), 0.0, 1.0);
-        infoStats.add(Component.translatable("tooltip.tacz.gun.armor_ignore", PERCENT_FORMAT.format(armor))
-                .withStyle(ChatFormatting.GRAY));
-        infoStats.add(Component.translatable("tooltip.tacz.gun.head_shot_multiplier",
-                        PERCENT_FORMAT.format(AttachmentDataUtils.getHeadshotMultiplier(gun, gunData)))
-                .withStyle(ChatFormatting.GRAY));
-        infoStats.add(Component.translatable("tooltip.tacz.gun.movement_speed", PERCENT_1_FORMAT.format(
-                        -SyncConfig.WEIGHT_SPEED_MULTIPLIER.get()
-                                * AttachmentDataUtils.getWightWithAttachment(gun, gunData)))
-                .withStyle(ChatFormatting.RED));
-        // 第三列：留给以后加的补充数据（开火模式、弹匣容量、内置配件……），当前没有就不画
+        rows.add(new ParamRow("tooltip.tacz.gun.armor_ignore", true, PERCENT_FORMAT.format(armor),
+                ChatFormatting.GRAY));
+        rows.add(new ParamRow("tooltip.tacz.gun.head_shot_multiplier", true,
+                PERCENT_FORMAT.format(AttachmentDataUtils.getHeadshotMultiplier(gun, gunData)),
+                ChatFormatting.GRAY));
+        rows.add(new ParamRow("tooltip.tacz.gun.movement_speed", true, PERCENT_1_FORMAT.format(
+                -SyncConfig.WEIGHT_SPEED_MULTIPLIER.get()
+                        * AttachmentDataUtils.getWightWithAttachment(gun, gunData)), ChatFormatting.RED));
+
+        // ---- 以下六项是 issue #8 补的 ----
+        rows.add(new ParamRow("gui.tacz.gun_refit.property_diagrams.fire_mode", false,
+                I18n.get("gui.tacz.gun_refit.property_diagrams."
+                        + iGun.getFireMode(gun).name().toLowerCase(Locale.ROOT)), ChatFormatting.WHITE));
+        rows.add(new ParamRow("gui.tacz.gun_refit.property_diagrams.ammo_capacity", false,
+                String.valueOf(ammoCapacity(gun, gunData)), ChatFormatting.WHITE));
+        rows.add(new ParamRow("gui.tacz.gun_refit.property_diagrams.rpm", false,
+                Math.round(numberOr(cache, "rpm", iGun.getRPM(gun))) + "rpm", ChatFormatting.WHITE));
+        rows.add(new ParamRow("gui.tacz.gun_refit.property_diagrams.ammo_speed", false,
+                Math.round(numberOr(cache, "ammo_speed", gunData.getBulletData().getSpeed())) + "m/s",
+                ChatFormatting.WHITE));
+        rows.add(new ParamRow("gui.tacz.gun_refit.property_diagrams.pierce", false,
+                String.valueOf(Math.round(numberOr(cache, "pierce", gunData.getBulletData().getPierce()))),
+                ChatFormatting.WHITE));
+        rows.add(new ParamRow("gui.tacz.gun_refit.property_diagrams.ads", false,
+                String.format("%.2fs", numberOr(cache, "ads", gunData.getAimTime())), ChatFormatting.WHITE));
+        return rows;
     }
 
-    /** 标签灰 + 数值白。TACZ 的标签 key 自带冒号，值直接接在后面。 */
-    private static MutableComponent labeled(String labelKey, Component value) {
-        return Component.translatable(labelKey).withStyle(ChatFormatting.GRAY).append(value);
+    /**
+     * 弹匣容量（含配件），口径照抄 TACZ 原生属性条：**非开膛枪膛里那一发也算上**
+     * （{@code GunPropertyDiagrams} 的 {@code barrelBulletAmount}）。
+     */
+    private static int ammoCapacity(ItemStack gun, GunData gunData) {
+        int count = AttachmentDataUtils.getAmmoCountWithAttachment(gun, gunData);
+        boolean inBarrel = gunData.getBolt() != Bolt.OPEN_BOLT && gun != null
+                && IGun.getIGunOrNull(gun) != null && IGun.getIGunOrNull(gun).hasBulletInBarrel(gun);
+        return inBarrel ? count + 1 : count;
+    }
+
+    /**
+     * 从属性缓存里取一个参数值，取不到就退回枪械静态值。
+     *
+     * <p>{@code getCache} 的泛型是指向推断的（写错类型能编译、运行期才炸），所以这里不硬转：
+     * 只认 {@link Number}，其它（没有这个 modifier、或者值是别的类型）一律退回 fallback。</p>
+     */
+    private static double numberOr(@Nullable AttachmentCacheProperty cache, String modifierId, double fallback) {
+        if (cache == null) {
+            return fallback;
+        }
+        try {
+            return cache.getCache(modifierId) instanceof Number number ? number.doubleValue() : fallback;
+        } catch (Exception e) {
+            // getCache 对未注册的 id 会 NPE（它直接 get(...).getValue()），按"取不到"处理
+            return fallback;
+        }
     }
 
     /**
