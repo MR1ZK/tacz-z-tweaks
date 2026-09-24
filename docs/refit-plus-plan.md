@@ -137,6 +137,12 @@ tacz_refit_plus/                    （新仓库，GPL-3.0）
 5. **收藏与记忆**：配件可收藏（置顶加权，ARC-9 排序方案：`SortOrder` + 收藏加权）；记住每把枪上次浏览的文件夹与滚动位置。
 6. **快捷操作**：一键拆空（确认弹窗）、镭射调色板与瞄具变焦档位收纳进详情条（沿用 TACZ 现有交互与 packet）。
 
+> ⚠️ **本节有三处被后续决策改掉，以票与地图为准：**
+>
+> - **第 3 条（不可安装分组）的"三个原因"不成立**：`allowAttachment` 只有标签匹配、不做类型检查（类型那层由"槽位本身合不合法"决定，配件锁是枪级标志），所以只有"标签不匹配"真会发生。做法定为**置底 + 分隔线 + 灰显 + 文字角标**、不做可折叠分组；角标两档说辞：「装不上这个配件」（有白名单但不含它）/「这里装不了配件」（枪压根没声明白名单）。见 [issue #6](https://github.com/MR1ZK/tacz-z-tweaks/issues/6) 与 `CONTEXT.md` 的「不可安装」。
+> - **第 6 条的后半句（瞄具变焦档位）已否决**（不是"v1 不做"，是不做）：TACZ 原生本来就没有档位选择器，档位是"开镜时再按一次瞄准键循环"，C2S 只有无载荷的 `ClientMessagePlayerZoom`，想"选档"必须新增协议 —— 正面撞 ADR-0001。见 [issue #14](https://github.com/MR1ZK/tacz-z-tweaks/issues/14)。前半句（镭射调色板收纳进详情条）**已实现**。
+> - **第 6 条里的"一键拆空"被推迟**（不是否决），见 [issue #15](https://github.com/MR1ZK/tacz-z-tweaks/issues/15)。第 4 条（文件夹浏览）的作废见 §3.1 的连带清单。
+
 ### 3.4 AutoStats 引擎（易读参数的核心）
 
 只读消费 TACZ 内置 17 种 modifier（damage / recoil / ads / rpm / weight / effective_range / ammo_speed / silence 等）：
