@@ -1,13 +1,13 @@
 # 会话上下文摘要
 
-> 2026-09-25，截至「地图归档后全面开工」这轮更新：**不可安装的配件分组（#6）、参数卡补六项（#8）、详情条第三列变化项（#7）、悬停驱动整条详情条（#9）、预设系统（#10）** 全部落进代码，并已发布 **v0.1.3**。之后按用户实机试玩反馈修了三处（变化列标签顺序、参数卡分隔符、预设整体挪到左上角 + 命名回车/保存按钮）。面向下一个接手的人（人或 agent）：读完这份文档应该能接着干活，不用翻对话记录。
+> 2026-09-25，截至「地图归档后全面开工」这轮更新：**不可安装的配件分组（#6）、参数卡补六项（#8）、详情条第三列变化项（#7）、悬停驱动整条详情条（#9）、预设系统（#10）** 全部落进代码，并已发布 **v0.1.3**。之后按用户实机试玩反馈修了三处（变化列标签顺序、参数卡分隔符、预设整体挪到左上角 + 命名回车/保存按钮），再发布 **v0.1.3-hotfix1**（与 TACZ Addon「随意配件」的对接修复 + 随意配件下的列表呈现与行间分隔线）。面向下一个接手的人（人或 agent）：读完这份文档应该能接着干活，不用翻对话记录。
 
 ## 项目一句话
 
 **TACZ: Z-Tweaks** —— Forge 1.20.1 客户端模组，用自绘 GUI 接管 TACZ（Timeless & Classics Guns）的改装界面（Z 键），提供更好的武器预览、更简单的改装流程、更易读的参数。对标 Garry's Mod 的 ARC-9。GPL-3.0。
 
 - 仓库：`github.com/MR1ZK/tacz-z-tweaks`，`main` 分支
-- 已发布：**v0.1.3**（Latest，2026-09-25，附 `z_tweaks-1.20.1-0.1.3.jar`）；此前依次是 v0.1.2 / v0.1.1-hotfix1 / v0.1.1 / v0.1.0
+- 已发布：**v0.1.3-hotfix1**（Latest，2026-09-25，附 `z_tweaks-1.20.1-0.1.3hotfix1.jar`）—— 修客户报的「装了 TACZ Addon、开着随意配件时配件看得见、装不上」（改走 addon 自己的包，见 [issue #18](https://github.com/MR1ZK/tacz-z-tweaks/issues/18)），另含随意配件下的候选列表呈现与行间分隔线两处调整；此前依次是 v0.1.3 / v0.1.2 / v0.1.1-hotfix1 / v0.1.1 / v0.1.0
 - 定位：原型（throwaway）阶段，M0–M2 完成、M3 部分完成，UI 仍按试玩反馈调整
 - **动功能之前先读[路线图](https://github.com/MR1ZK/tacz-z-tweaks/issues/1)**：一次 wayfinder 寻路留下的决策地图（1 张地图 + 16 张票），每个待做的功能都有一张票承载它的决策、取舍与依赖。**地图已于 2026-09-25 归档**（目的地达成、frontier 空）：16 张子票全部有结论 —— 12 解决 / 3 推迟 / 1 否决；推迟的是 #11（TACZ 版本下限与兼容策略）、#13（内部 API 适配层 compat/）、#15（一键拆空），否决的是 #14（瞄具变焦档位做成界面可选），**已解决的决策不因归档而失效**。开工前的规划稿在 `docs/refit-plus-plan.md`（已标注哪几节作废），三份调研在 `docs/research/`
 
@@ -16,7 +16,7 @@
 - 需要 `libs/tacz-1.20.1-1.1.8-hotfix.jar`（TACZ 本体，不入库）
 - `./gradlew build` / `./gradlew runClient`
 - 提交用 `git -c user.name=MR1ZK -c user.email=...noreply.github.com`（**仓库没配 git 身份**，别改全局 config）
-- 发布流程（v0.1.3 实走的那条）：改 `gradle.properties` 的 `mod_version` → `./gradlew build` → commit + `git push origin main` → `git tag v0.x.y` + `git push origin v0.x.y` → `gh release create v0.x.y --title "Z-Tweaks 0.x.y" --notes-file <文件> build/libs/<jar>`（说明照上一版格式写）。复用版本号时才需要 `git tag -f` 强移 + `--clobber`；**说明必须走 `--notes-file`** —— PowerShell 下多行 `--notes` 会被拆成多个参数
+- 发布流程（v0.1.3 与 v0.1.3-hotfix1 实走的同一条）：改 `gradle.properties` 的 `mod_version` → `./gradlew build` → commit + `git push origin main` → `git tag v0.x.y` + `git push origin v0.x.y` → `gh release create v0.x.y --title "Z-Tweaks 0.x.y" --notes-file <文件> build/libs/<jar>`（说明照上一版格式写）。**tag 里的 hotfix 带连字符**：`mod_version=0.1.3hotfix1` 对应的 tag 是 `v0.1.3-hotfix1`（沿用 v0.1.1-hotfix1）。复用版本号时才需要 `git tag -f` 强移 + `--clobber`；**说明必须走 `--notes-file`** —— PowerShell 下多行 `--notes` 会被拆成多个参数
 
 ## 架构要点
 
@@ -57,7 +57,7 @@
 
 - **地图归档 ≠ 功能做完**：仓库没有打开的 issue，**#6/#7/#8/#9/#10 已落进代码**；还留在纸上的只剩**收藏（#5）与会话内位置记忆**——`CONTEXT.md` 有「收藏」词条、ADR-0005 给它留了 `favorites.json`，但一颗星都没画（两个入口、排序里插在"已拥有"之后、只看收藏开关、按 枪 id + 槽位类型 记的滚动与选中项）。
 - **#7 的宽度表是概览态卡的三列几何（`usable/3.5`），槽位模式下的变化列是另一套**：详情条右侧现在三等分（Pros / Cons / 变化列），480×270 下每段约 93px。变化列那条"最多 5 行、要滚"的约束因此更紧，`drawParamChanges` 里做了裁剪与滚动。
-- **TACZ Addon 的「随意配件」（Liberate）**（[issue #18](https://github.com/MR1ZK/tacz-z-tweaks/issues/18)）：已做**软依赖对接** —— `client/LiberateBridge` 反射 3 个符号（`LiberateAttachment.isLiberated`、`LiberateAttachmentInstallPacket(int, ResourceLocation)`、`init.NetworkHandler.CHANNEL`），生效时改发它自己的包（只带枪槽位 + 配件 id），拿不到句柄就降级并在进界面时提示一次。**待定**：Liberate 下 #6 那道"不可安装就不让装"的护栏要不要放宽 —— 需要一次实机事实（addon 到底有没有放宽客户端 `allowAttachment`）。
+- **TACZ Addon 的「随意配件」（Liberate）**（[issue #18](https://github.com/MR1ZK/tacz-z-tweaks/issues/18)）：已做**软依赖对接** —— `client/LiberateBridge` 反射 3 个符号（`LiberateAttachment.isLiberated`、`LiberateAttachmentInstallPacket(int, ResourceLocation)`、`init.NetworkHandler.CHANNEL`），生效时改发它自己的包（只带枪槽位 + 配件 id），拿不到句柄就降级并在进界面时提示一次。**口径已按实机结果定下**：随意配件**只放开拥有性**（生存模式也全列、一律按可用呈现、可直接装），**白名单照旧过滤**（不在白名单里的配件不出现）；所以生效时不存在"不可安装"那一组、也用不上那道护栏。口径写进 `CONTEXT.md` 的「随意配件」词条。**仍开放**：预设应用还按"背包里有没有实物"算缺件，要不要让预设也走 Liberate 通道未定。
 - **mixin 目标是 1.1.8-hotfix 的签名**。mods.toml 下限放到 `[1.1.4,)` 但没对 1.1.4 实际冒烟过；旧版本若改了目标方法，注入静默降级（相机/虚拟装配失效，其余正常）
 - ~~`computeProsCons()` 每帧无缓存地跑（`AttachmentCacheProperty.eval` ×2）~~ —— 已随 #9 的缓存入口还掉：现在只有"枪 + NBT + 预览件"三者之一变化时才重算
 - 配置屏输入框改数值不会把滑块拖回（输入中间态会乱跳，故意不同步）
@@ -66,7 +66,7 @@
 - TACZ 经验等级百分比有个 int 整除 bug（非满级恒显 0.0%），我们的卡片已绕开；如果改回对齐原生行为要注意
 - **参数排序与筛选已实跑验证**（弹层绘制与命中、方向语义、改排序当场重建）。
 - 记一个约束：弹层内容有 `170px`，而它可用的垂直空间只有 `GUI 高 − 150` —— 所以 **GUI 高度不足 320 时它会滚动**（不只是裁掉）。将来加排序项或调行高，它会继续变长，别假设一屏放得下
-- 验证方式：`./gradlew runClient` 起开发客户端自己试；启动日志可以 `grep "at com.ztweaks"` 看有没有我们自己抛的异常（整局 0 条才算干净）。**想让 agent 也能"看画面"**：临时在 `ZtRefitScreen.render()` 末尾挂一个截图钩子 —— `Screenshot.grab(getMinecraft().gameDirectory, name, getMinecraft().getMainRenderTarget(), message -> {})`（1.20.1 的签名，已实测能编译），用环境变量 gate 住、每 2 秒一张、名字带上 `RefitTransform.getCurrentTransformType()`，图落在 `run/client/screenshots/`，agent 侧用 `read_file` 直接看图。**这段是验证脚手架，别提交**。
+- 验证方式：`./gradlew runClient` 起开发客户端自己试；启动日志可以 `grep "at com.ztweaks"` 看有没有我们自己抛的异常（整局 0 条才算干净）。**dev 环境装不了第三方 addon**：TACZ Addon 与 GunsmithLib 的 mixin 都 shadow 了 Minecraft 类成员（`taczaddon` 的 `AbstractContainerScreen.f_97732_`、`gunsmithlib` 的 `Entity.m_9236_`），ForgeGradle dev 下 refmap 对不上，而 mixin 默认要求注入成功 → 直接 FATAL、客户端起不来（**不是我们崩，也不是那两个模组坏**）。所以和 addon 的交互只能在**正式实例**（真 launcher + jar）里验；这两个 jar 现在被挪到 `run/client/mods-disabled/`。**想让 agent 也能"看画面"**：临时在 `ZtRefitScreen.render()` 末尾挂一个截图钩子 —— `Screenshot.grab(getMinecraft().gameDirectory, name, getMinecraft().getMainRenderTarget(), message -> {})`（1.20.1 的签名，已实测能编译），用环境变量 gate 住、每 2 秒一张、名字带上 `RefitTransform.getCurrentTransformType()`，图落在 `run/client/screenshots/`，agent 侧用 `read_file` 直接看图。**这段是验证脚手架，别提交**。
 
 ## 本会话踩过的坑（别再踩）
 
