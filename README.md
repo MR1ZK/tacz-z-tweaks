@@ -1,6 +1,6 @@
-# TACZ: Z-Tweaks
+# TACZ: Z-Tweaks（TACZ：改装UI调整）
 
-给 Minecraft 1.20.1（Forge）上的 [TACZ](https://github.com/MCModderAnchor/TACZ) 换一套改装界面：对着枪按 **Z**，打开的是 Z-Tweaks 的界面，而不是原来那一套。界面参考了 Garry's Mod 的 ARC-9。
+这是一个面向 Minecraft 1.20.1（Forge）的 [TACZ](https://github.com/MCModderAnchor/TACZ) 客户端附属模组：把它自带的改装界面换成更好用的一套 —— 对着枪按 **Z**，打开的就是 Z-Tweaks 界面。
 
 ## 它能帮你做什么
 
@@ -33,7 +33,7 @@
 
 - 按键一览：`docs/controls.md`
 - 配置项（游戏内「选项 → Mod → Z-Tweaks」，或直接改 `config/z_tweaks-client.toml`）：`docs/config.md`
-- 开发相关的笔记：术语表 `CONTEXT.md`、架构决策 `docs/adr/`、设计笔记 `docs/session-context.md`；这个项目做过一次系统的设计决策梳理，结论记在 [issue #1](https://github.com/MR1ZK/tacz-z-tweaks/issues/1)（已归档，但结论仍然有效）
+- 开发相关的笔记：术语表 `CONTEXT.md`、架构决策 `docs/adr/`、设计笔记 `docs/session-context.md`
 
 ## 自己构建
 
