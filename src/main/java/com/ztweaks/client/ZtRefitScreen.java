@@ -143,6 +143,13 @@ public class ZtRefitScreen extends GunRefitScreen {
     private final List<String> samples = new ArrayList<>();
 
     private AttachmentType cachedType = null;
+
+    /**
+     * 上一次重建候选时「随意配件」是否生效。它改变的是整份列表的可用性（白名单与拥有性都不再是
+     * 门槛），所以和 {@code cachedType} 一样要算进缓存键：玩家在界面开着的时候切开关，下一帧就该看到
+     * 列表跟着变，而不是等到换槽位。
+     */
+    private boolean cachedLiberate;
     private int selected = 0;
     private int scroll = 0;
     /** 本帧鼠标悬停的候选行（-1 = 没有）。每帧由 {@link #drawCandidateList} 重算。 */
@@ -574,12 +581,15 @@ public class ZtRefitScreen extends GunRefitScreen {
         if (iGun == null || type == AttachmentType.NONE) {
             candidates.clear();
             cachedType = type;
+            cachedLiberate = false;
             return;
         }
-        if (type == cachedType) {
+        boolean liberate = LiberateBridge.isActive(player);
+        if (type == cachedType && liberate == cachedLiberate) {
             return;
         }
         cachedType = type;
+        cachedLiberate = liberate;
         // 枪压根没声明白名单时，整批配件都是这一档（角标「这里装不了配件」）。
         boolean noWhitelist = whitelistEmpty(iGun.getGunId(gun));
         // 参数排序 / 筛选才需要逐候选跑一次属性求值。名称/模组排序下这一整段都不执行，
@@ -605,7 +615,9 @@ public class ZtRefitScreen extends GunRefitScreen {
                 continue;
             }
             ItemStack stack = AttachmentItemBuilder.create().setId(entry.getKey()).build();
-            Compat compat = iGun.allowAttachment(gun, stack)
+            // 随意配件生效时，槽位里没有"装不上"的件：addon 自己的包装件只带 枪槽位 + 配件 id，
+            // 服务端不需要在背包里找到实物、也不看白名单 —— 白名单与拥有性都不再是门槛。
+            Compat compat = liberate || iGun.allowAttachment(gun, stack)
                     ? Compat.OK
                     : (noWhitelist ? Compat.NO_WHITELIST : Compat.NOT_LISTED);
             if (!searchQuery.isBlank() && !matchesQuery(nameOf(stack))) {
@@ -615,7 +627,8 @@ public class ZtRefitScreen extends GunRefitScreen {
             if (compat == Compat.OK) {
                 // 生存模式只列真正带在身上的：装配件要把背包槽位发给服务端，没带在身上的
                 // 点了也装不上。创造模式列全部，没带在身上的在列表里标灰（能预览、装不上）。
-                if (invSlot < 0 && !player.isCreative()) {
+                // 随意配件是这条规则的例外：它不需要实物，所以生存模式也整列列出、且都算可用。
+                if (!liberate && invSlot < 0 && !player.isCreative()) {
                     continue;
                 }
             } else if (invSlot < 0) {
@@ -1213,6 +1226,7 @@ public class ZtRefitScreen extends GunRefitScreen {
         // 裁剪：滚动/悬停的行不会越出面板边线
         graphics.enableScissor(x + 1, listTop, right - 1, listTop + rows * ROW_H);
         int firstBlocked = firstBlockedIndex();
+        boolean liberate = liberateActive();
         for (int i = 0; i < rows && scroll + i < candidates.size(); i++) {
             int index = scroll + i;
             Rect row = rowRect(list, i);
@@ -1224,11 +1238,15 @@ public class ZtRefitScreen extends GunRefitScreen {
             Candidate entry = candidates.get(index);
             boolean owned = entry.invSlot() >= 0;
             String badge = blockedKey(entry.compat());
+            // 这行现在能不能装 = 可安装 且（在背包里 或 随意配件生效）。按钮、双击、这里的灰显
+            // 三处走同一条判据，不能各写一份。
+            boolean installable = entry.compat() == Compat.OK && (owned || liberate);
 
             if (index == firstBlocked) {
                 // 不可安装那批的上面压一条线把它隔开：不折叠、不分组，一条线就够了。
-                // 画在行间那 2px 的缝里，不额外吃一行高度。
-                graphics.fill(row.x(), row.y() - 2, row.x() + row.w(), row.y() - 1, 0x66FFFFFF);
+                // 画在行间那 2px 的缝里，不额外吃一行高度；铺满整条缝才看得见（早先只画 1px、
+                // 40% 白，实机反馈是"没看见"）。
+                graphics.fill(row.x() + 2, row.y() - 2, row.x() + row.w() - 2, row.y(), 0x99FFFFFF);
             }
             if (isSelected) {
                 roundedFill(graphics, row.x(), row.y(), row.w(), row.h(), ACCENT_SOFT);
@@ -1241,8 +1259,8 @@ public class ZtRefitScreen extends GunRefitScreen {
                         isSelected ? ACCENT : 0x88FFFFFF);
             }
             graphics.renderItem(entry.stack(), row.x() + 5, row.y() + 1);
-            if (!owned || badge != null) {
-                // 图标盖一层半透明黑：这两种行都点不动 —— 没带在身上的（服务端取不到件）
+            if (!installable) {
+                // 图标盖一层半透明黑：点不动的行才有 —— 没带在身上的（服务端取不到件）
                 // 与不可安装的（服务端两份包都会拒）。不标出来会让"能预览"被误读成"能装"。
                 // 前者只在创造模式看得到，后者只在玩家真握着它时出现。
                 graphics.fill(row.x() + 5, row.y() + 1, row.x() + 21, row.y() + 17, 0x80000000);
@@ -1251,7 +1269,7 @@ public class ZtRefitScreen extends GunRefitScreen {
             String name = entry.name();
             int badgeWidth = badge == null ? 0 : this.font.width(badge) + 5;
             graphics.drawString(this.font, this.font.plainSubstrByWidth(name, row.w() - 34 - badgeWidth),
-                    row.x() + 24, row.y() + 5, owned && badge == null ? TEXT : TEXT_MUTED, false);
+                    row.x() + 24, row.y() + 5, installable ? TEXT : TEXT_MUTED, false);
             if (badge != null) {
                 // 角标必须是文字：列表里已经有另一种灰（没带在身上的），光靠颜色分不开这两种"点不动"。
                 // 名字按剩余宽度截断即可 —— 悬停有完整名字的 tooltip，不为角标加宽面板。
@@ -1621,9 +1639,9 @@ public class ZtRefitScreen extends GunRefitScreen {
 
         Rect installRect = installRect();
         Rect unloadRect = unloadRect();
-        // 能装 = 拥有 + 兼容。只看"拥有"会让不可安装的行亮着按钮，点下去服务端两份包都静默拒绝，
+        // 能装 = 能装得到 + 兼容。只看"拥有"会让不可安装的行亮着按钮，点下去服务端两份包都静默拒绝，
         // 而客户端已经放过安装音效、弹过「已安装」—— 界面说装上了，枪上其实什么都没有。
-        boolean installEnabled = selectedOwned() && selectedCompat() == Compat.OK;
+        boolean installEnabled = selectedInstallable() && selectedCompat() == Compat.OK;
         // 概览态不画这两个按钮：没有选中槽位，它们永远处于禁用态，
         // 只会占着参数卡右下的空间。安装/卸载的提示也只跟按钮走。
         if (RefitTransform.getCurrentTransformType() != AttachmentType.NONE) {
@@ -1680,10 +1698,18 @@ public class ZtRefitScreen extends GunRefitScreen {
         };
     }
 
-    /** 选中候选是否在背包里。不在就发不出包（服务端只认自己那份背包），按钮据此禁用。 */
-    private boolean selectedOwned() {
+    /**
+     * 选中的候选现在能不能装：在背包里（TACZ 的包按槽位取件），或者「随意配件」生效
+     * （那走 addon 自己的包，只带配件 id，不需要实物）。按钮的启用状态据此定。
+     */
+    private boolean selectedInstallable() {
         Candidate c = selectedCandidate();
-        return c != null && c.invSlot() >= 0;
+        return c != null && (c.invSlot() >= 0 || liberateActive());
+    }
+
+    /** 「随意配件」是否正生效。没有玩家 / 桥不可用一律 false（照旧走 TACZ 那条路）。 */
+    private boolean liberateActive() {
+        return LiberateBridge.isActive(getMinecraft().player);
     }
 
     /** 当前槽位是否有可卸下的配件。概览态或空槽一律禁用卸载按钮。 */
