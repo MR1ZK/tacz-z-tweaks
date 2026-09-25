@@ -57,6 +57,7 @@
 
 - **地图归档 ≠ 功能做完**：仓库没有打开的 issue，**#6/#7/#8/#9/#10 已落进代码**；还留在纸上的只剩**收藏（#5）与会话内位置记忆**——`CONTEXT.md` 有「收藏」词条、ADR-0005 给它留了 `favorites.json`，但一颗星都没画（两个入口、排序里插在"已拥有"之后、只看收藏开关、按 枪 id + 槽位类型 记的滚动与选中项）。
 - **#7 的宽度表是概览态卡的三列几何（`usable/3.5`），槽位模式下的变化列是另一套**：详情条右侧现在三等分（Pros / Cons / 变化列），480×270 下每段约 93px。变化列那条"最多 5 行、要滚"的约束因此更紧，`drawParamChanges` 里做了裁剪与滚动。
+- **TACZ Addon 的「随意配件」（Liberate）**（[issue #18](https://github.com/MR1ZK/tacz-z-tweaks/issues/18)）：已做**软依赖对接** —— `client/LiberateBridge` 反射 3 个符号（`LiberateAttachment.isLiberated`、`LiberateAttachmentInstallPacket(int, ResourceLocation)`、`init.NetworkHandler.CHANNEL`），生效时改发它自己的包（只带枪槽位 + 配件 id），拿不到句柄就降级并在进界面时提示一次。**待定**：Liberate 下 #6 那道"不可安装就不让装"的护栏要不要放宽 —— 需要一次实机事实（addon 到底有没有放宽客户端 `allowAttachment`）。
 - **mixin 目标是 1.1.8-hotfix 的签名**。mods.toml 下限放到 `[1.1.4,)` 但没对 1.1.4 实际冒烟过；旧版本若改了目标方法，注入静默降级（相机/虚拟装配失效，其余正常）
 - ~~`computeProsCons()` 每帧无缓存地跑（`AttachmentCacheProperty.eval` ×2）~~ —— 已随 #9 的缓存入口还掉：现在只有"枪 + NBT + 预览件"三者之一变化时才重算
 - 配置屏输入框改数值不会把滑块拖回（输入中间态会乱跳，故意不同步）

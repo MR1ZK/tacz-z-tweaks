@@ -188,6 +188,8 @@ public class ZtRefitScreen extends GunRefitScreen {
     /** 从剪贴板读出来的预设，等玩家确认再落盘。 */
     @Nullable
     private PresetStore.Preset pendingImport = null;
+    /** "TACZ Addon 在但随意配件桥接不上"每次开界面只提示一次（不随服务端刷新重置）。 */
+    private boolean liberateWarned = false;
     /**
      * 最近一次"应用或保存"的预设名。导出用它当目标 —— 导出这一行本身就是行，
      * 拿"鼠标悬停的那份"当目标等于自指（想导出谁就得先把指针从谁身上移开）。
@@ -991,6 +993,12 @@ public class ZtRefitScreen extends GunRefitScreen {
         super.render(graphics, mouseX, mouseY, partialTick);
         rebuildCandidates();
         refreshPreview();
+        // 装了 TACZ Addon 但桥接不上：那条规则下的装件是**静默**失败的（服务端不回声，客户端却会响会弹条），
+        // 进界面时说一次 —— 不说的话这就是一次"我们的 bug"式投诉（issue #18 正是这么来的）
+        if (!liberateWarned && LiberateBridge.addonPresent() && !LiberateBridge.ready()) {
+            liberateWarned = true;
+            notify(I18n.get("gui.z_tweaks.refit.msg.liberate_unbridged"));
+        }
         if (samplesDirty && ZtConfig.DEBUG_SAMPLES.get()) {
             computeSamples();
         }
@@ -1735,6 +1743,19 @@ public class ZtRefitScreen extends GunRefitScreen {
         graphics.drawCenteredString(this.font, popup, x + w / 2 + 1, y + 3, (alpha << 24) | 0xBFF7FF);
     }
 
+    /** 诊断 HUD 用：随意配件那条桥的状态（没装 addon / 装了但接不上 / 生效中 / 未生效）。 */
+    private String liberateState() {
+        if (!LiberateBridge.addonPresent()) {
+            return I18n.get("gui.z_tweaks.refit.hud.liberate.off");
+        }
+        if (!LiberateBridge.ready()) {
+            return I18n.get("gui.z_tweaks.refit.hud.liberate.unbridged");
+        }
+        return I18n.get(LiberateBridge.isActive(getMinecraft().player)
+                ? "gui.z_tweaks.refit.hud.liberate.on"
+                : "gui.z_tweaks.refit.hud.liberate.off");
+    }
+
     /** 诊断 HUD 的每一行：mixin 是否注入、相机读数、取景进度、字体与按键速查。 */
     private List<String> debugLines() {
         int hits = OrbitCamera.applyCount();
@@ -1759,6 +1780,8 @@ public class ZtRefitScreen extends GunRefitScreen {
                 VirtualAssembly.hits(), VirtualAssembly.builds(), VirtualAssembly.previewName()));
         lines.add(I18n.get("gui.z_tweaks.refit.hud.refit",
                 fmt(RefitTransform.getOpeningProgress()), fmt(RefitTransform.getTransformProgress())));
+        // 随意配件（TACZ Addon）那条桥的状态：断了就照旧发 TACZ 的包，装件会静默无效（issue #18）
+        lines.add(I18n.get("gui.z_tweaks.refit.hud.liberate", liberateState()));
         lines.add(I18n.get("gui.z_tweaks.refit.hud.mode", ZtConfig.PROS_CONS_MODE.get()));
         lines.add(I18n.get("gui.z_tweaks.refit.hud.font"));
         lines.add(I18n.get("gui.z_tweaks.refit.hud.help"));
@@ -2069,6 +2092,20 @@ public class ZtRefitScreen extends GunRefitScreen {
         }
         ItemStack candidate = entry.stack();
         int inventorySlot = entry.invSlot();
+        // TACZ Addon 的「随意配件」（Liberate）生效时，配件在它的**虚拟背包**里：把槽位号报给
+        // 服务端没用（服务端读的是自己那份真背包，取不到件就静默 return，见 issue #18）。
+        // 这条路上必须发**它的**包 —— 只带 枪槽位 + 配件 id。
+        if (LiberateBridge.isActive(player)) {
+            ResourceLocation id = attachmentIdOf(candidate);
+            if (id != null && LiberateBridge.install(player.getInventory().selected, id)) {
+                SoundPlayManager.playerRefitSound(candidate, player, SoundManager.INSTALL_SOUND);
+                notify(I18n.get("gui.z_tweaks.refit.msg.installed", entry.name()));
+            } else {
+                // 桥在这条路上失败了：如实说，别装作装上了
+                notify(I18n.get("gui.z_tweaks.refit.msg.liberate_unbridged"));
+            }
+            return;
+        }
         if (inventorySlot >= 0) {
             AttachmentType type = RefitTransform.getCurrentTransformType();
             // 与原生一致：声音在发包前就放（原生 GunRefitScreen 同款），不等服务端确认。
