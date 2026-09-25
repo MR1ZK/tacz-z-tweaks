@@ -615,9 +615,14 @@ public class ZtRefitScreen extends GunRefitScreen {
                 continue;
             }
             ItemStack stack = AttachmentItemBuilder.create().setId(entry.getKey()).build();
-            // 随意配件生效时，槽位里没有"装不上"的件：addon 自己的包装件只带 枪槽位 + 配件 id，
-            // 服务端不需要在背包里找到实物、也不看白名单 —— 白名单与拥有性都不再是门槛。
-            Compat compat = liberate || iGun.allowAttachment(gun, stack)
+            boolean allowed = iGun.allowAttachment(gun, stack);
+            // 白名单管的永远是"这把枪能不能装这个件"，随意配件放开的是"手上有没有实物" ——
+            // 两件事别混。所以生效时不在白名单里的件**直接不列**：列出来就是在暗示这把枪能装它
+            // （实机反馈过：列表里出现了"不该出现在这把枪上"的配件）。
+            if (!allowed && liberate) {
+                continue;
+            }
+            Compat compat = allowed
                     ? Compat.OK
                     : (noWhitelist ? Compat.NO_WHITELIST : Compat.NOT_LISTED);
             if (!searchQuery.isBlank() && !matchesQuery(nameOf(stack))) {
