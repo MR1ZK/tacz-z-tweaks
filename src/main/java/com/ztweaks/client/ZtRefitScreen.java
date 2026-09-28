@@ -1129,6 +1129,43 @@ public class ZtRefitScreen extends GunRefitScreen {
         return slotBarTop() - SLOT_BAR_GAP - DETAIL_H;
     }
 
+    // ---------------------------------------------------------------- 详情条的列几何
+    // 下面这五个是**唯一**的列位来源：绘制、命中检测、滚轮分栏都从这里取。
+    // 原先 drawDetail / deltaColumnRect / attachColumnRect 各写过一遍同样的算式
+    // （0.40f、+6、-26、/3、+7），改一处忘一处就会"画在这、点在那"。
+    // 概览态的信息卡是另一套排版（按 share 三等分，见 INFO_COLUMN_SHARE），刻意不同。
+
+    /** 详情条内容区的左边界与总宽。 */
+    private int detailLeft() {
+        return PAD;
+    }
+
+    private int detailWidth() {
+        return this.width - PAD * 2;
+    }
+
+    /** 左列（配件卡 / 名字 + 描述）宽度：占总宽 40%，折行最吃宽度所以给得多。 */
+    private int detailLeftWidth() {
+        return (int) (detailWidth() * 0.40f);
+    }
+
+    /** 左列与右半边之间的间隔。 */
+    private static final int DETAIL_LEFT_GAP = 6;
+    /** 右半边三栏之间的间隔。 */
+    private static final int DETAIL_COLUMN_GAP = 7;
+    /** 右半边三等分前要先扣掉的宽度：一道左间隔 + 两道栏间隔 + 右侧留白。 */
+    private static final int DETAIL_RIGHT_RESERVE = DETAIL_LEFT_GAP + 2 * DETAIL_COLUMN_GAP + 6;
+
+    private int detailColumnWidth() {
+        return (detailWidth() - detailLeftWidth() - DETAIL_RIGHT_RESERVE) / 3;
+    }
+
+    /** 右半边第 {@code index} 栏的左边（0 = Pros、1 = Cons、2 = 变化列）。 */
+    private int detailColumnLeft(int index) {
+        return detailLeft() + detailLeftWidth() + DETAIL_LEFT_GAP
+                + index * (detailColumnWidth() + DETAIL_COLUMN_GAP);
+    }
+
     /** 槽位条的水平起点与列间距：绘制与命中检测共用，杜绝两处各写一份几何。 */
     private int[] slotBarGeometry(List<AttachmentType> types) {
         int step = slotStep(types);
@@ -1872,7 +1909,7 @@ public class ZtRefitScreen extends GunRefitScreen {
         // 左侧一道强调色竖条，把"这里是当前查看的配件"点明
         graphics.fill(x, y + 1, x + 2, y + height - 1, ACCENT);
 
-        int leftWidth = (int) (width * 0.40f);
+        int leftWidth = detailLeftWidth();
 
         if (!candidates.isEmpty()) {
             drawAttachmentInfo(graphics, x, y, leftWidth);
@@ -1882,20 +1919,15 @@ public class ZtRefitScreen extends GunRefitScreen {
         }
 
         // Pros/Cons 两栏：不写"优点 N / 缺点 N"标题，靠栏色（绿/红）与条目前缀区分；
-        // 省下的标题行高度直接换成多显示一条条目。
-        int columnX = x + leftWidth + 6;
-        // 右侧三等分：Pros / Cons / 变化列（第三列）。变化列是 issue #7 定的"只列变化项"，
-        // 由候选件驱动（issue #9）。480×270 下每段约 93px —— V1 那种"参数名 + 两个数"的行
-        // 本来就只有十几个字符，装得下（原型见 docs/prototypes/compare-panel.html）。
-        int columnWidth = (width - leftWidth - 26) / 3;
-        int rightColumnX = columnX + columnWidth + 7;
-        int deltaColumnX = rightColumnX + columnWidth + 7;
+        // 省下的标题行高度直接换成多显示一条条目。列位一律取 detailColumnLeft（几何只有那一处）。
+        int columnX = detailColumnLeft(0);
+        int columnWidth = detailColumnWidth();
         int entryTop = y + 5;
         // 条目数按按钮位置反推，避免最后一行压到按钮上（按钮挪了这里自动跟着变）
         int entryLimit = Math.max(1, (installRect().y() - 2 - entryTop) / 10);
         drawPropertyColumn(graphics, columnX, columnWidth, entryTop, entryLimit, pros, GOOD);
-        drawPropertyColumn(graphics, rightColumnX, columnWidth, entryTop, entryLimit, cons, BAD);
-        drawParamChanges(graphics, deltaColumnX, columnWidth, entryTop, entryLimit);
+        drawPropertyColumn(graphics, detailColumnLeft(1), columnWidth, entryTop, entryLimit, cons, BAD);
+        drawParamChanges(graphics, detailColumnLeft(2), columnWidth, entryTop, entryLimit);
 
         Rect installRect = installRect();
         Rect unloadRect = unloadRect();
@@ -3214,13 +3246,9 @@ public class ZtRefitScreen extends GunRefitScreen {
         }
     }
 
-    /** 变化列（第三列）的矩形：滚轮判定与绘制同源，几何不各写一份。 */
+    /** 变化列（第三列）的矩形：滚轮判定与绘制同源 —— 列位只从 detailColumnLeft 取。 */
     private Rect deltaColumnRect() {
-        int width = this.width - PAD * 2;
-        int leftWidth = (int) (width * 0.40f);
-        int columnX = PAD + leftWidth + 6;
-        int columnWidth = (width - leftWidth - 26) / 3;
-        return new Rect(columnX + 2 * (columnWidth + 7), detailY(), columnWidth, DETAIL_H);
+        return new Rect(detailColumnLeft(2), detailY(), detailColumnWidth(), DETAIL_H);
     }
 
     /**
@@ -3299,13 +3327,12 @@ public class ZtRefitScreen extends GunRefitScreen {
 
     /** 详情条矩形：概览态下滚轮落在这里才滚信息卡。 */
     private Rect detailRect() {
-        return new Rect(PAD, detailY(), this.width - PAD * 2, DETAIL_H);
+        return new Rect(detailLeft(), detailY(), detailWidth(), DETAIL_H);
     }
 
     /** 详情条左列（配件名字 + 描述）矩形：选中配件时滚轮落在这里才滚描述。 */
     private Rect attachColumnRect() {
-        int width = this.width - PAD * 2;
-        return new Rect(PAD, detailY(), (int) (width * 0.40f), DETAIL_H);
+        return new Rect(detailLeft(), detailY(), detailLeftWidth(), DETAIL_H);
     }
 
     /**
