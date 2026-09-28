@@ -1,13 +1,14 @@
 package com.ztweaks.config;
 
+import com.ztweaks.client.ZtTheme;
 import net.minecraftforge.common.ForgeConfigSpec;
 
 /**
  * 客户端配置。
  *
- * <p>{@code refit} 段是功能项（默认开）；{@code debug} 段是原型期的调参与诊断探针，
- * 其中布尔项默认全部关闭，数值调参项默认取代码里原本硬编码的值 —— 需要时在
- * {@code config/z_tweaks-client.toml} 里手动调整。</p>
+ * <p>{@code refit} 段是功能项（默认开）；{@code look} 段是外观（主题与自定义强调色，见 ADR-0007）；
+ * {@code debug} 段是原型期的调参与诊断探针，其中布尔项默认全部关闭，数值调参项默认取代码里原本
+ * 硬编码的值 —— 需要时在 {@code config/z_tweaks-client.toml} 里手动调整。</p>
  */
 public final class ZtConfig {
 
@@ -36,6 +37,15 @@ public final class ZtConfig {
     public static final ForgeConfigSpec.BooleanValue ORBIT_CAMERA;
     /** 是否启用悬停虚拟装配（硬关）。 */
     public static final ForgeConfigSpec.BooleanValue VIRTUAL_ASSEMBLY;
+
+    // ------------------------------------------------------------------ look
+    /** 界面主题（见 ADR-0007）。两个入口读写同一项：改装界面左上角的按钮、配置屏那一行。 */
+    public static final ForgeConfigSpec.EnumValue<ZtTheme.Id> THEME;
+    /**
+     * 默认主题的自定义强调色（0xRRGGBB）。**只对默认主题生效** —— 其余主题的强调色是它调性的
+     * 组成部分，随手改会立刻变味。压在强调色上的文字按亮度自动切黑 / 白，所以纯黑也看得清。
+     */
+    public static final ForgeConfigSpec.IntValue THEME_ACCENT;
 
     // ------------------------------------------------------------------ debug
     /** 左上角诊断 HUD：mixin 命中数、相机读数、枢轴读数、取景进度、字体测试。 */
@@ -79,6 +89,18 @@ public final class ZtConfig {
                 .comment("启用悬停虚拟装配（鼠标划过候选配件即在预览里试装）",
                         "false = 预览始终是手上的真枪")
                 .define("virtual_assembly", true);
+        builder.pop();
+
+        builder.comment("界面外观（见 docs/adr/0007-ui-theme-system.md）").push("look");
+        THEME = builder
+                .comment("界面主题",
+                        "DEFAULT = 默认（TACZ 青，可调强调色）",
+                        "MD3 / FLUENT / LIQUID_GLASS / AERO / MAC / WIN_CLASSIC = 其余六套预设")
+                .defineEnum("theme", ZtTheme.Id.DEFAULT);
+        THEME_ACCENT = builder
+                .comment("默认主题的自定义强调色（0xRRGGBB，默认取 TACZ HUD 的 0x55FFFF）",
+                        "只对默认主题生效；压在强调色上的文字会按亮度自动切黑 / 白")
+                .defineInRange("accent_rgb", 0x55FFFF, 0x000000, 0xFFFFFF);
         builder.pop();
 
         builder.comment("原型期的调参与诊断探针：布尔项默认关闭，数值项默认取代码里的原值").push("debug");

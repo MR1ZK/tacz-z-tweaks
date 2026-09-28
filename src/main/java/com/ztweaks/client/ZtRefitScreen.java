@@ -258,6 +258,9 @@ public class ZtRefitScreen extends GunRefitScreen {
     public void init() {
         // 原型：不调用 super.init()，全部自绘。
         this.clearWidgets();
+        // 主题是"活动调色板"（见 ADR-0007）：进界面前从配置重算一次，配置屏或按钮改了主题
+        // 之后都能立刻看到效果。放在这里而不是模组初始化 —— 配置项在构造期还不允许读。
+        ZtUi.refresh();
         this.invalidateCandidates();
         // 弹出层跟着关：init() 会被切槽位与服务端刷新（装/卸完成后）触发，
         // 此时底下的列表已经换了一批，留着旧菜单容易点到不存在的内容。
