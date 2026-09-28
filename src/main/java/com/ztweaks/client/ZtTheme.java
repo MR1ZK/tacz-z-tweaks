@@ -29,10 +29,7 @@ public record ZtTheme(Id id,
     public enum Id {
         DEFAULT("default"),
         MD3("md3"),
-        FLUENT("fluent"),
-        LIQUID_GLASS("liquid_glass"),
         AERO("aero"),
-        MAC("mac"),
         WIN_CLASSIC("win_classic");
 
         private final String key;
@@ -136,12 +133,30 @@ public record ZtTheme(Id id,
 
     /** 悬停时压在白底上的白：选中竖条、滚动条滑块这类"不跟主题走、只表示当前"的标记。 */
     public int whiteOverlay() {
-        return 0x88FFFFFF;
+        return onLightPanel() ? withAlpha(0xFF000000, 0x66) : 0x88FFFFFF;
     }
 
-    /** 弹层滚动条，以及"当前项"的勾选标记。 */
+    /** 弹层滚动条，以及"当前项"的标记。 */
     public int mark() {
-        return 0xAAFFFFFF;
+        return onLightPanel() ? withAlpha(0xFF000000, 0xAA) : 0xAAFFFFFF;
+    }
+
+    /**
+     * 次要文字（{@code TEXT_DIM} / {@code TEXT_MUTED}）在浅色面板上要往**黑**里走，
+     * 而不是往面板色里混 —— 往面板混会把字洗成"跟底差不多亮"，实机反馈就是"字看不清"
+     * （Win 经典最明显）。深色面板上原样返回。
+     */
+    public int textDimInk() {
+        return onLightPanel() ? darken(textDim, 0.35f) : textDim;
+    }
+
+    public int textMutedInk() {
+        return onLightPanel() ? darken(textMuted, 0.45f) : textMuted;
+    }
+
+    /** 不可安装的角标 / 提示文字：浅色面板上先加深，保证还是"红褐"而不是"浅灰"。 */
+    public int blockedInk() {
+        return onLightPanel() ? darken(blocked, 0.45f) : blocked;
     }
 
     /** 上下暗角（3D 预览区压暗用）。 */
@@ -167,8 +182,9 @@ public record ZtTheme(Id id,
         return withAlpha(accent, 0xAA);
     }
 
+    /** 弹条描边：浅色面板上要压一条深边，不然一个浅底贴一个浅底等于没有边框。 */
     public int toastEdge() {
-        return mix(panelTop, 0xFFFFFFFF, 0.28f);
+        return onLightPanel() ? mix(panelTop, 0xFF000000, 0.35f) : mix(panelTop, 0xFFFFFFFF, 0.28f);
     }
 
     public int toastText() {
@@ -177,11 +193,13 @@ public record ZtTheme(Id id,
 
     /** 失效槽位（枪不支持该槽位）的边框与文字：比不可安装更沉，一眼是"这里没有"。 */
     public int brokenBorder() {
-        return mix(blocked, panelBottom, 0.63f);
+        int base = blockedInk();
+        return onLightPanel() ? darken(base, 0.55f) : mix(base, panelBottom, 0.63f);
     }
 
     public int brokenText() {
-        return mix(blocked, panelBottom, 0.38f);
+        int base = blockedInk();
+        return onLightPanel() ? darken(base, 0.30f) : mix(base, panelBottom, 0.38f);
     }
 
     // ------------------------------------------------------------------ 颜色小工具
@@ -232,33 +250,12 @@ public record ZtTheme(Id id,
             0xFF7CD98A, 0xFFFF8A8A, 0xFFAF8A8A, 0x1FFFFFFF, 0x2FFFFFFF,
             0xFF211F26, 0x55FFFFFF, 0x1FFFFFFF);
 
-    /** Fluent 亚克力：半透明深灰 + Windows 蓝，细描边走高光。 */
-    private static final ZtTheme FLUENT = new ZtTheme(Id.FLUENT,
-            0xCC232323, 0xCC181818, Surface.GLASS, 1, 0x33FFFFFF,
-            0xFF60CDFF, 0xFFFFFFFF, 0xFFC8C8C8, 0xFF8C8C8C,
-            0xFF6CCB5F, 0xFFFF99A4, 0xFFB08A8A, 0x18FFFFFF, 0x28FFFFFF,
-            0xCC1F1F1F, 0x55FFFFFF, 0x1CFFFFFF);
-
-    /** 液态玻璃：浅色半透明面板 + iOS 蓝，文字翻成深色（面板整体提亮）。 */
-    private static final ZtTheme LIQUID_GLASS = new ZtTheme(Id.LIQUID_GLASS,
-            0x88FFFFFF, 0x55E8ECF2, Surface.GLASS, 2, 0xAAFFFFFF,
-            0xFF0A84FF, 0xFF14161A, 0xFF3A3F46, 0xFF6B7178,
-            0xFF1E9E4A, 0xFFC63B3B, 0xFF9A5A5A, 0x1F000000, 0x22000000,
-            0x99FFFFFF, 0xAAFFFFFF, 0x22000000);
-
     /** 千禧航空（Frutiger Aero）：天空蓝渐变 + 水绿强调 + 泛白高光，圆润。 */
     private static final ZtTheme AERO = new ZtTheme(Id.AERO,
             0xE62A7FB0, 0xE6164A6E, Surface.GLASS, 2, 0x99DFF6FF,
             0xFF7FE3B0, 0xFFF2FBFF, 0xFFCDE9F5, 0xFF9FC4D4,
             0xFF8BE07A, 0xFFFF9A8A, 0xFFC98A8A, 0x22EAF9FF, 0x33FFFFFF,
             0xD92A6E96, 0x99E8FAFF, 0x33FFFFFF);
-
-    /** mac 风格：深色毛玻璃 + 系统蓝，灰阶偏冷。 */
-    private static final ZtTheme MAC = new ZtTheme(Id.MAC,
-            0xCC2C2C2E, 0xCC1E1E20, Surface.GLASS, 2, 0x2EFFFFFF,
-            0xFF0A84FF, 0xFFF5F5F7, 0xFFAEAEB2, 0xFF7C7C80,
-            0xFF30D158, 0xFFFF453A, 0xFFB07A7A, 0x1AFFFFFF, 0x26FFFFFF,
-            0xCC262628, 0x44FFFFFF, 0x1AFFFFFF);
 
     /** Win 经典：银灰浮雕面板 + 标题栏藏青，直角、无渐变。 */
     private static final ZtTheme WIN_CLASSIC = new ZtTheme(Id.WIN_CLASSIC,
@@ -272,10 +269,7 @@ public record ZtTheme(Id id,
         return switch (id) {
             case DEFAULT -> DEFAULT;
             case MD3 -> MD3;
-            case FLUENT -> FLUENT;
-            case LIQUID_GLASS -> LIQUID_GLASS;
             case AERO -> AERO;
-            case MAC -> MAC;
             case WIN_CLASSIC -> WIN_CLASSIC;
         };
     }

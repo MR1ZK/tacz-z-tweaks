@@ -98,7 +98,7 @@ public final class ZtConfigScreen extends Screen {
     }
 
     /**
-     * 主题行：值显示成 lang 里的短名 —— 枚举名对玩家没意义，{@code LIQUID_GLASS} 那种更没意义。
+     * 主题行：值显示成 lang 里的短名 —— 枚举名对玩家没意义，{@code WIN_CLASSIC} 那种更没意义。
      * 改完立刻刷新活动调色板，回去开改装界面就是新主题。
      */
     private void addTheme() {

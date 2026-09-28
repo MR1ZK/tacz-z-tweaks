@@ -95,7 +95,7 @@ public final class ZtConfig {
         THEME = builder
                 .comment("界面主题",
                         "DEFAULT = 默认（TACZ 青，可调强调色）",
-                        "MD3 / FLUENT / LIQUID_GLASS / AERO / MAC / WIN_CLASSIC = 其余六套预设")
+                        "MD3 / AERO / WIN_CLASSIC = 另外三套预设")
                 .defineEnum("theme", ZtTheme.Id.DEFAULT);
         THEME_ACCENT = builder
                 .comment("默认主题的自定义强调色（0xRRGGBB，默认取 TACZ HUD 的 0x55FFFF）",

@@ -133,11 +133,12 @@ public final class ZtUi {
         ACCENT_LIGHT = ZtTheme.mix(accent, 0xFFFFFFFF, 0.72f);
         ON_ACCENT = theme.onAccent();
         TEXT = theme.text();
-        TEXT_DIM = theme.textDim();
-        TEXT_MUTED = theme.textMuted();
+        // 次要 / 失效两档按面板深浅换算法：浅色面板上往黑里走，否则字会被洗成"跟底差不多亮"
+        TEXT_DIM = theme.textDimInk();
+        TEXT_MUTED = theme.textMutedInk();
         GOOD = theme.good();
         BAD = theme.bad();
-        BLOCKED = theme.blocked();
+        BLOCKED = theme.blockedInk();
         HOVER_OVERLAY = theme.hoverOverlay();
         TRACK_BG = theme.controlBg();
         SHADOW = theme.shadow();
