@@ -88,9 +88,9 @@ public class ZtRefitScreen extends GunRefitScreen {
      * 上下边框各自留一点白，方块与文字都不许越界（用户实机反馈：原先名字画在方块上方，
      * 连面板一起顶进了上面的详情条）。
      */
-    private static final int SLOT_PAD_TOP = 3;
+    private static final int SLOT_PAD_TOP = 2;
     private static final int SLOT_LABEL_H = 10;
-    private static final int SLOT_PAD_BOTTOM = 3;
+    private static final int SLOT_PAD_BOTTOM = 2;
     private static final int SLOT_BAR_H = SLOT_PAD_TOP + SLOT + SLOT_LABEL_H + SLOT_PAD_BOTTOM;
     /** 槽位条面板与详情条之间的固定间隙：谁都不许盖过谁。 */
     private static final int SLOT_BAR_GAP = 6;
