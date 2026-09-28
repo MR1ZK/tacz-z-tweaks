@@ -7,7 +7,8 @@
 **TACZ: Z-Tweaks** —— Forge 1.20.1 客户端模组，用自绘 GUI 接管 TACZ（Timeless & Classics Guns）的改装界面（Z 键），提供更好的武器预览、更简单的改装流程、更易读的参数。对标 Garry's Mod 的 ARC-9。GPL-3.0。
 
 - 仓库：`github.com/MR1ZK/tacz-z-tweaks`，`main` 分支
-- 已发布：**v0.1.3-hotfix1**（Latest，2026-09-25，附 `z_tweaks-1.20.1-0.1.3hotfix1.jar`）—— 修客户报的「装了 TACZ Addon、开着随意配件时配件看得见、装不上」（改走 addon 自己的包，见 [issue #18](https://github.com/MR1ZK/tacz-z-tweaks/issues/18)），另含随意配件下的候选列表呈现与行间分隔线两处调整；此前依次是 v0.1.3 / v0.1.2 / v0.1.1-hotfix1 / v0.1.1 / v0.1.0
+- 已发布：**v0.3.3**（Latest，2026-09-28，附 `z_tweaks-1.20.1-0.3.3.jar`）—— 新增界面主题（四套，默认主题可调强调色，见 ADR-0007 与 `CONTEXT.md` 的「主题」「强调色」），并按实机反馈重排了底栏与信息框（名字移到方块下方、底栏不压信息框、浅色主题文字改走黑墨）
+- 上一版：**v0.1.3-hotfix1**（2026-09-25，附 `z_tweaks-1.20.1-0.1.3hotfix1.jar`）—— 修客户报的「装了 TACZ Addon、开着随意配件时配件看得见、装不上」（改走 addon 自己的包，见 [issue #18](https://github.com/MR1ZK/tacz-z-tweaks/issues/18)），另含随意配件下的候选列表呈现与行间分隔线两处调整；此前依次是 v0.1.3 / v0.1.2 / v0.1.1-hotfix1 / v0.1.1 / v0.1.0
 - 定位：原型（throwaway）阶段，M0–M2 完成、M3 部分完成，UI 仍按试玩反馈调整
 - **动功能之前先读[路线图](https://github.com/MR1ZK/tacz-z-tweaks/issues/1)**：一次 wayfinder 寻路留下的决策地图（1 张地图 + 16 张票），每个待做的功能都有一张票承载它的决策、取舍与依赖。**地图已于 2026-09-25 归档**（目的地达成、frontier 空）：16 张子票全部有结论 —— 12 解决 / 3 推迟 / 1 否决；推迟的是 #11（TACZ 版本下限与兼容策略）、#13（内部 API 适配层 compat/）、#15（一键拆空），否决的是 #14（瞄具变焦档位做成界面可选），**已解决的决策不因归档而失效**。开工前的规划稿在 `docs/refit-plus-plan.md`（已标注哪几节作废），三份调研在 `docs/research/`
 
