@@ -83,6 +83,17 @@ public class ZtRefitScreen extends GunRefitScreen {
     private static final int ROW_H = 19;
     private static final int DETAIL_H = 68;
     private static final int PAD = 6;
+    /**
+     * 槽位条（底栏）的内边距与总高。名字写在方块**下方**、整块塞进这块面板里 ——
+     * 上下边框各自留一点白，方块与文字都不许越界（用户实机反馈：原先名字画在方块上方，
+     * 连面板一起顶进了上面的详情条）。
+     */
+    private static final int SLOT_PAD_TOP = 4;
+    private static final int SLOT_LABEL_H = 11;
+    private static final int SLOT_PAD_BOTTOM = 4;
+    private static final int SLOT_BAR_H = SLOT_PAD_TOP + SLOT + SLOT_LABEL_H + SLOT_PAD_BOTTOM;
+    /** 槽位条面板与详情条之间的固定间隙：谁都不许盖过谁。 */
+    private static final int SLOT_BAR_GAP = 6;
     /** 候选面板宽度与内部两栏高度：绘制与命中检测共用 {@link #listRect()}，不再各写一份。 */
     private static final int LIST_W = 190;
     private static final int LIST_HEADER = 15;
@@ -1100,12 +1111,22 @@ public class ZtRefitScreen extends GunRefitScreen {
         }
     }
 
-    private int slotBarY() {
-        return this.height - SLOT - 6;
+    /** 槽位条面板的顶边。 */
+    private int slotBarTop() {
+        return this.height - SLOT_BAR_H - 6;
     }
 
+    /** 槽位方块的顶边：面板内部，上面留 {@link #SLOT_PAD_TOP}。 */
+    private int slotBarY() {
+        return slotBarTop() + SLOT_PAD_TOP;
+    }
+
+    /**
+     * 详情条的底边永远在槽位条面板**上方** {@link #SLOT_BAR_GAP} 处 ——
+     * 底栏的边框压到信息框上，是用户实机反馈里明确不许发生的一条。
+     */
     private int detailY() {
-        return slotBarY() - DETAIL_H - 4;
+        return slotBarTop() - SLOT_BAR_GAP - DETAIL_H;
     }
 
     /** 槽位条的水平起点与列间距：绘制与命中检测共用，杜绝两处各写一份几何。 */
@@ -1132,8 +1153,9 @@ public class ZtRefitScreen extends GunRefitScreen {
         ItemStack gun = gunStack();
         IGun iGun = IGun.getIGunOrNull(gun);
 
-        // 整条槽位条坐在一块圆角渐变面板上：3D 画面上直接摆一排方块会"飘"，加个托底就有层次
-        panel(graphics, x0 - 6, y - 15, barWidth + 12, SLOT + 22);
+        // 整条槽位条坐在一块圆角渐变面板上：3D 画面上直接摆一排方块会"飘"，加个托底就有层次。
+        // 面板从方块的顶边再往上留 SLOT_PAD_TOP，往下留到名字下面 —— 方块与文字都在里面。
+        panel(graphics, x0 - 6, y - SLOT_PAD_TOP, barWidth + 12, SLOT_BAR_H);
 
         for (int i = 0; i < types.size(); i++) {
             AttachmentType type = types.get(i);
@@ -1161,14 +1183,15 @@ public class ZtRefitScreen extends GunRefitScreen {
                         allowed ? TEXT_MUTED : BROKEN_TEXT);
             }
 
+            // 名字写在方块**下方**（紧贴方块），整块仍在底栏面板里：上下都不越界
             String label = truncate(slotName(type), step - 2);
             int labelColor = !allowed ? BLOCKED : (isCurrent ? ACCENT : (hovered ? TEXT : TEXT_DIM));
-            graphics.drawCenteredString(this.font, label, rect.x() + rect.w() / 2, y - 10, labelColor);
-            // 当前槽位用名字下的强调线标记，比整块高亮更克制、也更不抢枪的视觉
+            graphics.drawCenteredString(this.font, label, rect.x() + rect.w() / 2, rect.y() + SLOT + 1, labelColor);
+            // 当前槽位在方块下沿压一条强调线，比整块高亮更克制、也更不抢枪的视觉
             if (isCurrent) {
                 int w = this.font.width(label);
                 int cx = rect.x() + rect.w() / 2;
-                graphics.fill(cx - w / 2, y - 2, cx + w / 2, y - 1, ACCENT);
+                graphics.fill(cx - w / 2, rect.y() + SLOT - 1, cx + w / 2, rect.y() + SLOT, ACCENT);
             }
 
             if (hovered) {
@@ -3201,6 +3224,29 @@ public class ZtRefitScreen extends GunRefitScreen {
     }
 
     /**
+     * 把信息卡里的"三级灰阶"在画的时候换成活动调色板的墨色。
+     *
+     * <p>信息卡的行是预先拼好的 {@link Component}：WHITE / GRAY / DARK_GRAY 写死在文本样式里，
+     * 切到浅色主题（Win 经典）时那几档字就贴着浅底看不清。这里只映射这三档
+     * （{@code 0xFFFFFF → TEXT}、{@code 0xAAAAAA → TEXT_DIM}、{@code 0x555555 → TEXT_MUTED}），
+     * 其余颜色 —— 红绿黄这些语义色 —— 原样保留，所以"移动速度变红"这类含义不会被一起洗掉。
+     * 深色主题下三档的映射值本来就与它们几乎同色，等于没变。</p>
+     */
+    private static FormattedCharSequence recolorInk(FormattedCharSequence line) {
+        return sink -> line.accept((index, style, codePoint) -> {
+            var color = style.getColor();
+            int rgb = color == null ? -1 : color.getValue();
+            int mapped = switch (rgb) {
+                case 0xFFFFFF -> TEXT;
+                case 0xAAAAAA -> TEXT_DIM;
+                case 0x555555 -> TEXT_MUTED;
+                default -> -1;
+            };
+            return sink.accept(index, mapped == -1 ? style : style.withColor(mapped), codePoint);
+        });
+    }
+
+    /**
      * 三列铺进详情条，各列独立滚动，文字按 {@link #INFO_SCALE} 缩放。
      *
      * <p>缩放靠 {@code pose.scale}，所以坐标全在"局部空间"里：列宽要先除以缩放系数
@@ -3243,7 +3289,7 @@ public class ZtRefitScreen extends GunRefitScreen {
             infoColumnLines[c] = lines.size();
             infoScroll[c] = Mth.clamp(infoScroll[c], 0, Math.max(0, lines.size() - INFO_ROWS));
             for (int i = infoScroll[c]; i < Math.min(lines.size(), infoScroll[c] + INFO_ROWS); i++) {
-                graphics.drawString(this.font, lines.get(i), (int) localLeft,
+                graphics.drawString(this.font, recolorInk(lines.get(i)), (int) localLeft,
                         (i - infoScroll[c]) * INFO_LINE_H, TEXT, false);
             }
             localLeft += localWidth;
@@ -3318,7 +3364,8 @@ public class ZtRefitScreen extends GunRefitScreen {
         pose.translate(x + 26, y + 4, 0);
         pose.scale(INFO_SCALE, INFO_SCALE, 1f);
         for (int i = attachScroll; i < Math.min(wrapped.size(), attachScroll + rows); i++) {
-            graphics.drawString(this.font, wrapped.get(i), 0, (i - attachScroll) * INFO_LINE_H, TEXT, false);
+            graphics.drawString(this.font, recolorInk(wrapped.get(i)), 0,
+                    (i - attachScroll) * INFO_LINE_H, TEXT, false);
         }
         pose.popPose();
     }
