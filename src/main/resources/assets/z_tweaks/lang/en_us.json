@@ -136,5 +136,7 @@
   "gui.z_tweaks.theme.short.liquid_glass": "Glass",
   "gui.z_tweaks.theme.short.aero": "Aero",
   "gui.z_tweaks.theme.short.mac": "mac",
-  "gui.z_tweaks.theme.short.win_classic": "Classic"
+  "gui.z_tweaks.theme.short.win_classic": "Classic",
+  "gui.z_tweaks.config.group.look": "--- Look ---",
+  "gui.z_tweaks.config.theme": "UI theme"
 }

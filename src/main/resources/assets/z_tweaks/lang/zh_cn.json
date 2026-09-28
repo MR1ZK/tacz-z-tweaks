@@ -136,5 +136,7 @@
   "gui.z_tweaks.theme.short.liquid_glass": "玻璃",
   "gui.z_tweaks.theme.short.aero": "航空",
   "gui.z_tweaks.theme.short.mac": "mac",
-  "gui.z_tweaks.theme.short.win_classic": "经典"
+  "gui.z_tweaks.theme.short.win_classic": "经典",
+  "gui.z_tweaks.config.group.look": "——— 外观 ———",
+  "gui.z_tweaks.config.theme": "界面主题"
 }

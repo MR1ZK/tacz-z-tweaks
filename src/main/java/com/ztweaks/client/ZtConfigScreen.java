@@ -1,5 +1,7 @@
 package com.ztweaks.client;
 
+import com.ztweaks.client.ZtTheme;
+import com.ztweaks.client.ZtUi;
 import com.ztweaks.config.ZtConfig;
 import net.minecraft.client.gui.GuiGraphics;
 import net.minecraft.client.gui.components.AbstractWidget;
@@ -50,11 +52,17 @@ public final class ZtConfigScreen extends Screen {
     @Override
     protected void init() {
         this.rows.clear();
+        // 主题是"活动调色板"（ADR-0007）：进这个屏也先跟配置对一次，免得显示的是旧主题
+        ZtUi.refresh();
         addHeader("group.refit");
         addEnum("pros_cons_mode", ZtConfig.PROS_CONS_MODE, ZtConfig.ProsConsMode.values());
         addBool("takeover", ZtConfig.TAKEOVER);
         addBool("orbit_camera", ZtConfig.ORBIT_CAMERA);
         addBool("virtual_assembly", ZtConfig.VIRTUAL_ASSEMBLY);
+
+        // 外观：主题在这里也能换（不开改装界面时的入口），与左上角那颗按钮读写同一项
+        addHeader("group.look");
+        addTheme();
 
         addHeader("group.debug");
         addBool("hud", ZtConfig.DEBUG_HUD);
@@ -87,6 +95,20 @@ public final class ZtConfigScreen extends Screen {
                 .withValues(values)
                 .withInitialValue(spec.get())
                 .create(0, 0, 310, 20, label(id), (btn, v) -> spec.set(v)));
+    }
+
+    /**
+     * 主题行：值显示成 lang 里的短名 —— 枚举名对玩家没意义，{@code LIQUID_GLASS} 那种更没意义。
+     * 改完立刻刷新活动调色板，回去开改装界面就是新主题。
+     */
+    private void addTheme() {
+        addRow(CycleButton.<ZtTheme.Id>builder(id -> Component.literal(ZtTheme.of(id).shortName().getString()))
+                .withValues(ZtTheme.Id.values())
+                .withInitialValue(ZtConfig.THEME.get())
+                .create(0, 0, 310, 20, label("theme"), (btn, id) -> {
+                    ZtConfig.THEME.set(id);
+                    ZtUi.refresh();
+                }));
     }
 
     private void addBool(String id, ForgeConfigSpec.BooleanValue spec) {
@@ -157,7 +179,8 @@ public final class ZtConfigScreen extends Screen {
         this.renderBackground(graphics);
         layoutRows();
         super.render(graphics, mouseX, mouseY, partialTick);
-        graphics.drawCenteredString(this.font, this.title, this.width / 2, 12, 0xFFFFFF);
+        // 这个屏是 Forge 原生控件，改不动它们的外观；标题色是唯一跟得上主题的地方（ADR-0007 第 7 条）
+        graphics.drawCenteredString(this.font, this.title, this.width / 2, 12, ZtUi.ACCENT_LIGHT);
     }
 
     @Override
