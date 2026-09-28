@@ -371,12 +371,6 @@ public class ZtRefitScreen extends GunRefitScreen {
         return List.copyOf(rows);
     }
 
-    /** 当前排序键对应的参数项；名称 / 模组时返回 null。 */
-    @Nullable
-    private StatCatalog.StatDef selectedStat() {
-        return statOf(sortKey);
-    }
-
     @Nullable
     private static StatCatalog.StatDef statOf(int key) {
         int index = key - SORT_STAT_BASE;
@@ -410,7 +404,7 @@ public class ZtRefitScreen extends GunRefitScreen {
             String field = sortKey == SORT_NAME ? "name" : "mod";
             return I18n.get("gui.z_tweaks.refit.sort." + field + (sortBestFirst ? ".asc" : ".desc"));
         }
-        StatCatalog.StatDef stat = selectedStat();
+        StatCatalog.StatDef stat = statOf(sortKey);
         String name = stat == null ? "" : I18n.get(stat.langKey());
         return I18n.get("gui.z_tweaks.refit.sort.stat", name,
                 I18n.get("gui.z_tweaks.refit.sort." + (sortBestFirst ? "best" : "worst")));
@@ -446,7 +440,7 @@ public class ZtRefitScreen extends GunRefitScreen {
      * 这一行此时置灰并忽略点击 —— 与其藏起来让弹出层高度跳变，不如留着位置。
      */
     private boolean filterAvailable() {
-        return selectedStat() != null;
+        return statOf(sortKey) != null;
     }
 
     /** 弹出层内容的总高度（十四行 + 两个分隔条 + 上下内边距），不受视口限制。 */
@@ -624,7 +618,7 @@ public class ZtRefitScreen extends GunRefitScreen {
         boolean noWhitelist = whitelistEmpty(iGun.getGunId(gun));
         // 参数排序 / 筛选才需要逐候选跑一次属性求值。名称/模组排序下这一整段都不执行，
         // 一分钱不花。
-        StatCatalog.StatDef stat = selectedStat();
+        StatCatalog.StatDef stat = statOf(sortKey);
         GunData gunData = null;
         AttachmentCacheProperty base = null;
         if (stat != null) {
@@ -1166,24 +1160,28 @@ public class ZtRefitScreen extends GunRefitScreen {
                 + index * (detailColumnWidth() + DETAIL_COLUMN_GAP);
     }
 
+    /** 槽位条的水平几何：起点与列间距。原先用 {@code int[]} 返回，"下标 0 是哪个"全靠记。 */
+    private record SlotBar(int x0, int step) {
+    }
+
     /** 槽位条的水平起点与列间距：绘制与命中检测共用，杜绝两处各写一份几何。 */
-    private int[] slotBarGeometry(List<AttachmentType> types) {
+    private SlotBar slotBarGeometry(List<AttachmentType> types) {
         int step = slotStep(types);
-        return new int[]{(this.width - types.size() * step) / 2, step};
+        return new SlotBar((this.width - types.size() * step) / 2, step);
     }
 
     /** 第 index 个槽位的方块矩形（列内居中，列宽大于方块时两侧留白对称）。 */
     private Rect slotRect(List<AttachmentType> types, int index) {
-        int[] geo = slotBarGeometry(types);
-        int cell = geo[0] + index * geo[1];
-        return new Rect(cell + (geo[1] - SLOT) / 2, slotBarY(), SLOT, SLOT);
+        SlotBar bar = slotBarGeometry(types);
+        int cell = bar.x0() + index * bar.step();
+        return new Rect(cell + (bar.step() - SLOT) / 2, slotBarY(), SLOT, SLOT);
     }
 
     private void drawSlotBar(GuiGraphics graphics, int mouseX, int mouseY) {
         List<AttachmentType> types = slotTypes();
-        int[] geo = slotBarGeometry(types);
-        int step = geo[1];
-        int x0 = geo[0];
+        SlotBar bar = slotBarGeometry(types);
+        int step = bar.step();
+        int x0 = bar.x0();
         int barWidth = types.size() * step;
         int y = slotBarY();
         AttachmentType current = RefitTransform.getCurrentTransformType();
