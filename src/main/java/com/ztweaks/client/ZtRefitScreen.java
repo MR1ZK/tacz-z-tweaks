@@ -182,6 +182,19 @@ public class ZtRefitScreen extends GunRefitScreen {
     /** 预设弹层是否展开、滚到哪；当前枪的预设列表只在打开与增删时重读盘。 */
     private boolean presetMenuOpen = false;
     private int presetMenuScroll = 0;
+
+    // 主题弹层（见 ADR-0007）。与预设 / 排序弹层同一套骨架；它是"当前状态指示器"，
+    // 点一次**不关**，方便连着比几套。
+    private boolean themeMenuOpen = false;
+    private int themeMenuScroll = 0;
+    /**
+     * 强调色输入中。刻意不挂 {@link EditBox}：只有"#RRGGBB"七个字符，自己收按键更省事，
+     * 也免了与搜索框 / 命名框抢焦点那套排序（见 charTyped 与 keyPressed 最前面的分支）。
+     */
+    private boolean accentEditing = false;
+    private String accentText = "";
+    /** 进入输入前那一份"已落盘"的强调色：边输边预览会就地改配置，Esc 取消时靠它回退。 */
+    private int accentCommitted = 0x55FFFF;
     private final List<PresetStore.Preset> presets = new ArrayList<>();
     /** 保存流程：名字输入框是否挂着、当前名字、以及"同名再来一次就覆盖"的第二次确认。 */
     private boolean namingPreset = false;
@@ -266,6 +279,9 @@ public class ZtRefitScreen extends GunRefitScreen {
         // 此时底下的列表已经换了一批，留着旧菜单容易点到不存在的内容。
         this.sortMenuOpen = false;
         this.sortMenuScroll = 0;
+        this.themeMenuOpen = false;
+        this.themeMenuScroll = 0;
+        this.accentEditing = false;
         this.hoveredRow = -1;
         this.lastRowClickTime = 0L;
         this.lastRowClickIndex = -1;
@@ -1042,6 +1058,10 @@ public class ZtRefitScreen extends GunRefitScreen {
         // 预设那一层画在所有面板与浮层之上：按钮 → 弹层 → 确认面板 → 命名行（含保存按钮）。
         // 画在最后 = 鼠标判定排最前（见 mouseClicked），也不会被调试 HUD 盖住。
         drawPresetButton(graphics, mouseX, mouseY);
+        drawThemeButton(graphics, mouseX, mouseY);
+        if (themeMenuOpen) {
+            drawThemeMenu(graphics, mouseX, mouseY);
+        }
         if (presetMenuOpen) {
             drawPresetMenu(graphics, mouseX, mouseY);
         }
@@ -1350,6 +1370,215 @@ public class ZtRefitScreen extends GunRefitScreen {
         if (hovered) {
             tooltip(Component.literal(I18n.get("gui.z_tweaks.refit.preset.tooltip")),
                     (int) mouseX, (int) mouseY);
+        }
+    }
+
+    // ---------------------------------------------------------------- 主题（ADR-0007）
+
+    /** 主题弹层里的行：{@code >= 0} = 主题表里的第 n 个，其余是固定动作。与预设 / 排序同一套写法。 */
+    private static final int TM_ACCENT = -1;
+    private static final int TM_RESET = -2;
+    private static final int TM_SEP = -3;
+    private static final int TM_NONE = -4;
+    private static final int THEME_MENU_W = 150;
+
+    /**
+     * 左上角的"主题"按钮：紧挨"预设"右边、同尺寸，内容是**色块 + 当前主题缩写** ——
+     * 它是"当前状态指示器"，瞥一眼就该知道现在是什么主题。
+     */
+    private Rect themeRect() {
+        Rect preset = presetRect();
+        return new Rect(preset.x() + preset.w() + 4, preset.y(), preset.w(), preset.h());
+    }
+
+    private void drawThemeButton(GuiGraphics graphics, int mouseX, int mouseY) {
+        Rect rect = themeRect();
+        boolean hovered = !dragging && rect.contains(mouseX, mouseY);
+        boolean active = hovered || themeMenuOpen;
+        roundedFill(graphics, rect.x(), rect.y(), rect.w(), rect.h(), active ? BADGE_BG_ACTIVE : BADGE_BG);
+        roundedBorder(graphics, rect.x(), rect.y(), rect.w(), rect.h(), active ? WHITE_OVERLAY : HAIRLINE);
+        roundedFill(graphics, rect.x() + 4, rect.y() + 4, 6, 6, ACCENT);
+        graphics.drawString(this.font, truncate(ZtUi.theme().shortName().getString(), rect.w() - 16),
+                rect.x() + 13, rect.y() + 3, active ? TEXT : TEXT_DIM, false);
+        if (hovered) {
+            tooltip(Component.translatable("gui.z_tweaks.theme.tooltip", ZtUi.theme().displayName()),
+                    (int) mouseX, (int) mouseY);
+        }
+    }
+
+    private List<Integer> themeMenuRows() {
+        List<Integer> rows = new ArrayList<>();
+        for (int i = 0; i < ZtTheme.Id.values().length; i++) {
+            rows.add(i);
+        }
+        rows.add(TM_SEP);
+        rows.add(TM_ACCENT);
+        rows.add(TM_RESET);
+        return rows;
+    }
+
+    private int themeMenuContentHeight() {
+        int height = MENU_PAD * 2;
+        for (int key : themeMenuRows()) {
+            height += key == TM_SEP ? MENU_SEP_H : MENU_ROW_H;
+        }
+        return height;
+    }
+
+    private int themeMenuMaxScroll() {
+        return Math.max(0, themeMenuContentHeight() - themeMenuRect().h());
+    }
+
+    /** 弹层外框：主题按钮正下方，右侧夹进窗口（两个按钮都在左上角，右边没地方长）。 */
+    private Rect themeMenuRect() {
+        Rect anchor = themeRect();
+        int top = anchor.y() + anchor.h() + 2;
+        int height = Math.min(themeMenuContentHeight(),
+                Math.max(MENU_ROW_H * 2 + MENU_PAD * 2, detailY() - top - 4));
+        int x = Math.min(anchor.x(), Math.max(2, this.width - THEME_MENU_W - 2));
+        return new Rect(x, top, THEME_MENU_W, height);
+    }
+
+    private int themeMenuKeyAt(double mouseX, double mouseY) {
+        Rect menu = themeMenuRect();
+        if (!menu.contains(mouseX, mouseY)) {
+            return TM_NONE;
+        }
+        int contentY = (int) (mouseY - menu.y()) + themeMenuScroll;
+        int y = MENU_PAD;
+        for (int key : themeMenuRows()) {
+            int height = key == TM_SEP ? MENU_SEP_H : MENU_ROW_H;
+            if (contentY >= y && contentY < y + height) {
+                return key == TM_SEP ? TM_NONE : key;
+            }
+            y += height;
+        }
+        return TM_NONE;
+    }
+
+    private void drawThemeMenu(GuiGraphics graphics, int mouseX, int mouseY) {
+        Rect menu = themeMenuRect();
+        themeMenuScroll = Mth.clamp(themeMenuScroll, 0, themeMenuMaxScroll());
+        roundedFill(graphics, menu.x(), menu.y(), menu.w(), menu.h(), MENU_BG);
+        roundedBorder(graphics, menu.x(), menu.y(), menu.w(), menu.h(), MENU_BORDER);
+        graphics.enableScissor(menu.x() + 1, menu.y() + 1, menu.x() + menu.w() - 1, menu.y() + menu.h() - 1);
+        boolean inside = menu.contains(mouseX, mouseY);
+        int y = menu.y() + MENU_PAD - themeMenuScroll;
+        for (int key : themeMenuRows()) {
+            int height = key == TM_SEP ? MENU_SEP_H : MENU_ROW_H;
+            if (key == TM_SEP) {
+                graphics.fill(menu.x() + 4, y + 1, menu.x() + menu.w() - 4, y + 2, HAIRLINE);
+            } else {
+                boolean hovered = inside && mouseY >= y && mouseY < y + height;
+                if (hovered) {
+                    roundedFill(graphics, menu.x() + 2, y, menu.w() - 4, height, MENU_HOVER);
+                }
+                int textColor = hovered ? TEXT : TEXT_DIM;
+                int textX = menu.x() + 15;
+                if (key >= 0 && key < ZtTheme.Id.values().length) {
+                    ZtTheme entry = ZtTheme.of(ZtTheme.Id.values()[key]);
+                    // 行内色块：直接给这套主题的面板底 + 强调色，比名字更好认
+                    roundedFill(graphics, menu.x() + 5, y + 2, 8, 7, entry.panelTop());
+                    roundedFill(graphics, menu.x() + 5, y + 9, 8, 2, entry.accent());
+                    if (entry.id() == ZtUi.theme().id()) {
+                        // 当前项：左边缘一条强调色（勾号字形在 MC 默认字体里不一定有）
+                        graphics.fill(menu.x() + 2, y + 1, menu.x() + 4, y + height - 1, ACCENT);
+                    }
+                } else if (key == TM_ACCENT) {
+                    textColor = accentRowEnabled()
+                            ? (accentEditing ? (pendingAccent() != null ? ACCENT : BAD) : textColor)
+                            : TEXT_MUTED;
+                    textX = menu.x() + 8;
+                } else {
+                    textX = menu.x() + 8;
+                }
+                String label = accentEditing && key == TM_ACCENT ? accentText : themeMenuLabel(key);
+                graphics.drawString(this.font, truncate(label, menu.w() - (textX - menu.x()) - 6),
+                        textX, y + 2, textColor, false);
+            }
+            y += height;
+        }
+        graphics.disableScissor();
+        if (themeMenuScroll > 0) {
+            graphics.fill(menu.x() + 1, menu.y() + 1, menu.x() + menu.w() - 1, menu.y() + 3, MENU_SCROLL_HINT);
+        }
+        if (themeMenuScroll < themeMenuMaxScroll()) {
+            graphics.fill(menu.x() + 1, menu.y() + menu.h() - 3,
+                    menu.x() + menu.w() - 1, menu.y() + menu.h() - 1, MENU_SCROLL_HINT);
+        }
+    }
+
+    private String themeMenuLabel(int key) {
+        if (key >= 0 && key < ZtTheme.Id.values().length) {
+            return ZtTheme.of(ZtTheme.Id.values()[key]).displayName().getString();
+        }
+        return switch (key) {
+            case TM_ACCENT -> accentEditing
+                    ? I18n.get("gui.z_tweaks.theme.accent_hint")
+                    : I18n.get("gui.z_tweaks.theme.accent");
+            case TM_RESET -> I18n.get("gui.z_tweaks.theme.accent_reset");
+            default -> "";
+        };
+    }
+
+    /** 调色只对默认主题开放（其余主题的强调色是它调性的组成部分，见 ADR-0007 第 5 条）。 */
+    private boolean accentRowEnabled() {
+        return ZtUi.theme().id() == ZtTheme.Id.DEFAULT;
+    }
+
+    private void clickThemeMenu(int key, int button) {
+        ZtTheme.Id[] ids = ZtTheme.Id.values();
+        if (key >= 0 && key < ids.length) {
+            ZtConfig.THEME.set(ids[key]);
+            accentEditing = false;
+            ZtUi.refresh();
+            ZtConfig.SPEC.save();
+            notify(I18n.get("gui.z_tweaks.theme.applied", ZtUi.theme().displayName().getString()));
+            return;
+        }
+        switch (key) {
+            case TM_ACCENT -> {
+                if (!accentRowEnabled()) {
+                    notify(I18n.get("gui.z_tweaks.theme.accent_only_default"));
+                    return;
+                }
+                accentEditing = true;
+                accentCommitted = ZtConfig.THEME_ACCENT.get();
+                accentText = String.format("#%06X", accentCommitted & 0xFFFFFF);
+            }
+            case TM_RESET -> {
+                int factory = ZtTheme.of(ZtTheme.Id.DEFAULT).accent() & 0xFFFFFF;
+                ZtConfig.THEME_ACCENT.set(factory);
+                accentEditing = false;
+                ZtUi.refresh();
+                ZtConfig.SPEC.save();
+                notify(I18n.get("gui.z_tweaks.theme.accent_reset_done"));
+            }
+            default -> {
+            }
+        }
+    }
+
+    /** 输入中的强调色：六个十六进制位齐全才给颜色，否则给 null（保持上一次有效值，字标红）。 */
+    @Nullable
+    private Integer pendingAccent() {
+        String hex = accentText.startsWith("#") ? accentText.substring(1) : accentText;
+        if (hex.length() != 6) {
+            return null;
+        }
+        try {
+            return Integer.parseInt(hex, 16);
+        } catch (NumberFormatException e) {
+            return null;
+        }
+    }
+
+    /** 每敲一个字就试着应用一次 —— 这就是"边输边预览"；非法则原样留着、字标红。 */
+    private void previewAccent() {
+        Integer rgb = pendingAccent();
+        if (rgb != null) {
+            ZtConfig.THEME_ACCENT.set(rgb);
+            ZtUi.refresh();
         }
     }
 
@@ -1857,7 +2086,33 @@ public class ZtRefitScreen extends GunRefitScreen {
             return true;
         }
         if (presetRect().contains(mouseX, mouseY)) {
+            themeMenuOpen = false;
+            accentEditing = false;
             openPresetMenu();
+            return true;
+        }
+        if (themeRect().contains(mouseX, mouseY)) {
+            themeMenuOpen = !themeMenuOpen;
+            themeMenuScroll = 0;
+            if (themeMenuOpen) {
+                closePresetMenu();
+            } else {
+                accentEditing = false;
+            }
+            return true;
+        }
+        // 主题弹层：点一次**不关**（方便连着比几套），只有点到行上才生效
+        if (themeMenuOpen && themeMenuRect().contains(mouseX, mouseY)) {
+            int key = themeMenuKeyAt(mouseX, mouseY);
+            if (key != TM_NONE) {
+                clickThemeMenu(key, button);
+            }
+            return true;
+        }
+        // 点别处 = 收起。这一下照样吃掉，不穿透给下面的列表
+        if (themeMenuOpen || accentEditing) {
+            themeMenuOpen = false;
+            accentEditing = false;
             return true;
         }
         // 中键：复位相机，与 R 键走同一条路径（MC 的 button 从 0 起算，故中键是 2）
@@ -1990,6 +2245,12 @@ public class ZtRefitScreen extends GunRefitScreen {
                     0, presetMenuMaxScroll());
             return true;
         }
+        // 主题弹层同理
+        if (themeMenuOpen && themeMenuRect().contains(mouseX, mouseY)) {
+            themeMenuScroll = Mth.clamp(themeMenuScroll - (int) Math.signum(delta) * MENU_ROW_H,
+                    0, themeMenuMaxScroll());
+            return true;
+        }
         // 弹出层展开时，指针落在它上面就滚它自己（内容可能高过视口），不穿透给底下的列表
         if (sortMenuOpen && sortMenuRect().contains(mouseX, mouseY)) {
             sortMenuScroll = Mth.clamp(sortMenuScroll - (int) Math.signum(delta) * MENU_ROW_H,
@@ -2039,6 +2300,24 @@ public class ZtRefitScreen extends GunRefitScreen {
         }
     }
 
+    /**
+     * 调色输入自己收字符：只有"#RRGGBB"七个位，不挂 {@link EditBox} 反而更省事，
+     * 也免了与搜索框 / 命名框抢焦点。输入中把字符全吃掉，别漏给搜索框。
+     */
+    @Override
+    public boolean charTyped(char codePoint, int modifiers) {
+        if (accentEditing) {
+            char c = Character.toUpperCase(codePoint);
+            boolean hex = c >= '0' && c <= '9' || c >= 'A' && c <= 'F';
+            if (hex && accentText.length() < 7) {
+                accentText = accentText + c;
+                previewAccent();
+            }
+            return true;
+        }
+        return super.charTyped(codePoint, modifiers);
+    }
+
     @Override
     public boolean keyPressed(int keyCode, int scanCode, int modifiers) {
         // 搜索框聚焦时把按键交回给 super：本方法在 super 之前就吞掉了 1–6 / 上下键 /
@@ -2048,6 +2327,29 @@ public class ZtRefitScreen extends GunRefitScreen {
         }
         // 预设的名字输入框比一切都优先：不排在最前，下面的"ENTER = 安装"会先把回车吃掉
         // （症状：保存预设时按回车，弹出来的是「没有可安装的候选配件」）。
+        // 调色输入排在最前：它只认退格 / 回车 / Esc，其余按键一律吃掉，免得回车被下面的"安装"抢走
+        if (accentEditing) {
+            if (keyCode == GLFW.GLFW_KEY_ESCAPE) {
+                ZtConfig.THEME_ACCENT.set(accentCommitted);
+                accentEditing = false;
+                ZtUi.refresh();
+                return true;
+            }
+            if (keyCode == GLFW.GLFW_KEY_ENTER || keyCode == GLFW.GLFW_KEY_KP_ENTER) {
+                if (pendingAccent() != null) {
+                    ZtConfig.SPEC.save();
+                    notify(I18n.get("gui.z_tweaks.theme.accent_applied", accentText));
+                }
+                accentEditing = false;
+                return true;
+            }
+            if (keyCode == GLFW.GLFW_KEY_BACKSPACE && accentText.length() > 1) {
+                accentText = accentText.substring(0, accentText.length() - 1);
+                previewAccent();
+                return true;
+            }
+            return true;
+        }
         if (namingPreset) {
             if (keyCode == GLFW.GLFW_KEY_ENTER || keyCode == GLFW.GLFW_KEY_KP_ENTER) {
                 saveCurrentAsPreset();
@@ -2062,8 +2364,11 @@ public class ZtRefitScreen extends GunRefitScreen {
         }
         // ESC 先收预设那一层（弹层 / 确认面板），而不是直接关界面
         if (keyCode == GLFW.GLFW_KEY_ESCAPE
-                && (presetMenuOpen || pendingPlan != null || pendingImport != null)) {
+                && (presetMenuOpen || themeMenuOpen || accentEditing
+                || pendingPlan != null || pendingImport != null)) {
             closePresetMenu();
+            themeMenuOpen = false;
+            accentEditing = false;
             pendingPlan = null;
             pendingImport = null;
             return true;
