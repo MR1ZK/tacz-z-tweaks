@@ -588,7 +588,7 @@ public class ZtRefitScreen extends GunRefitScreen {
     }
 
     /**
-     * 候选配件：分两组装进同一个列表，靠 {@link Candidate#compat()} 与排序器分组（见 ADR 与
+     * 候选配件：分两组装进同一个列表，靠 {@link Candidate#allow()} 与排序器分组（见 ADR 与
      * issue #6 的解决评论）。
      *
      * <p>第一组是**能装**的（{@code iGun.allowAttachment} 通过）：生存模式只列背包里有的 ——
@@ -652,14 +652,14 @@ public class ZtRefitScreen extends GunRefitScreen {
             if (!allowed && liberate) {
                 continue;
             }
-            Compat compat = allowed
-                    ? Compat.OK
-                    : (noWhitelist ? Compat.NO_WHITELIST : Compat.NOT_LISTED);
+            AllowState allow = allowed
+                    ? AllowState.OK
+                    : (noWhitelist ? AllowState.NO_WHITELIST : AllowState.NOT_LISTED);
             if (!searchQuery.isBlank() && !matchesQuery(nameOf(stack))) {
                 continue;
             }
             int invSlot = findInventorySlot(inventory, entry.getKey());
-            if (compat == Compat.OK) {
+            if (allow == AllowState.OK) {
                 // 生存模式只列真正带在身上的：装配件要把背包槽位发给服务端，没带在身上的
                 // 点了也装不上。创造模式列全部，没带在身上的在列表里标灰（能预览、装不上）。
                 // 随意配件是这条规则的例外：它不需要实物，所以生存模式也整列列出、且都算可用。
@@ -671,14 +671,14 @@ public class ZtRefitScreen extends GunRefitScreen {
                 continue;
             }
             // 改善量只对能装的算：不可安装的组合不存在，"装上之后"是一组没有意义的数。
-            double improvement = compat != Compat.OK || stat == null
+            double improvement = allow != AllowState.OK || stat == null
                     ? 0 : measureImprovement(stat, gun, iGun, gunData, base, stack);
             // 筛选：只看比"现在装着的"更好的。刻意不区分是否拥有 —— 拥有性是生存/创造规则的
             // 职责（上面那一行已经在管），在这里再滤一次只会让创造模式下的列表行为变得难以解释。
-            if (compat == Compat.OK && stat != null && onlyImproving && improvement <= 0) {
+            if (allow == AllowState.OK && stat != null && onlyImproving && improvement <= 0) {
                 continue;
             }
-            found.add(new Candidate(stack, invSlot, compat, nameOf(stack),
+            found.add(new Candidate(stack, invSlot, allow, nameOf(stack),
                     entry.getKey().getNamespace(), improvement));
         }
         found.sort(candidateComparator());
@@ -740,8 +740,8 @@ public class ZtRefitScreen extends GunRefitScreen {
         // 的问题，而它们装不上。放在列表里只为解释"手里这件为什么装不上"（见 issue #6）。
         Comparator<Candidate> blocked = Comparator.comparing(c -> c.name().toLowerCase(Locale.ROOT));
         return (a, b) -> {
-            boolean okA = a.compat() == Compat.OK;
-            boolean okB = b.compat() == Compat.OK;
+            boolean okA = a.allow() == AllowState.OK;
+            boolean okB = b.allow() == AllowState.OK;
             if (okA != okB) {
                 return okA ? -1 : 1;
             }
@@ -862,7 +862,7 @@ public class ZtRefitScreen extends GunRefitScreen {
         if (preview == null || iGun == null) {
             return;
         }
-        if (preview.compat() != Compat.OK) {
+        if (preview.allow() != AllowState.OK) {
             // 不可安装的件不给 Pros/Cons 与参数：那是"装上之后"的账，而这个组合不存在
             //（与 #9 拒绝"一把不存在的枪配一组真实的数"同一条理由）。
             return;
@@ -1288,10 +1288,10 @@ public class ZtRefitScreen extends GunRefitScreen {
             }
             Candidate entry = candidates.get(index);
             boolean owned = entry.invSlot() >= 0;
-            String badge = blockedKey(entry.compat());
+            String badge = blockedKey(entry.allow());
             // 这行现在能不能装 = 可安装 且（在背包里 或 随意配件生效）。按钮、双击、这里的灰显
             // 三处走同一条判据，不能各写一份。
-            boolean installable = entry.compat() == Compat.OK && (owned || liberate);
+            boolean installable = entry.allow() == AllowState.OK && (owned || liberate);
 
             if (index == firstBlocked) {
                 // 不可安装那批的上面压一条线把它隔开：不折叠、不分组，一条线就够了。
@@ -1856,7 +1856,7 @@ public class ZtRefitScreen extends GunRefitScreen {
         // 不可安装的件不虚拟装配：3D 讲的是"装上之后那把枪"，而那个组合不可能存在
         // （与 #9 拒绝"一把不存在的枪配一组真实的数"同一条理由）。
         if (hoveredRow < 0 || hoveredRow >= candidates.size() || type == AttachmentType.NONE
-                || candidates.get(hoveredRow).compat() != Compat.OK) {
+                || candidates.get(hoveredRow).allow() != AllowState.OK) {
             VirtualAssembly.clear();
             return;
         }
@@ -1901,7 +1901,7 @@ public class ZtRefitScreen extends GunRefitScreen {
         Rect unloadRect = unloadRect();
         // 能装 = 能装得到 + 兼容。只看"拥有"会让不可安装的行亮着按钮，点下去服务端两份包都静默拒绝，
         // 而客户端已经放过安装音效、弹过「已安装」—— 界面说装上了，枪上其实什么都没有。
-        boolean installEnabled = selectedInstallable() && selectedCompat() == Compat.OK;
+        boolean installEnabled = selectedInstallable() && selectedAllowState() == AllowState.OK;
         // 概览态不画这两个按钮：没有选中槽位，它们永远处于禁用态，
         // 只会占着参数卡右下的空间。安装/卸载的提示也只跟按钮走。
         if (RefitTransform.getCurrentTransformType() != AttachmentType.NONE) {
@@ -1913,7 +1913,7 @@ public class ZtRefitScreen extends GunRefitScreen {
             // 不可用时把原因说清楚：悬停给提示，而不是点了没反应
             if (!dragging && installRect.contains(mouseX, mouseY) && !installEnabled) {
                 // 禁用原因分两种：不可安装说"为什么装不上"，没带在身上说"缺件"
-                String blocked = blockedKey(selectedCompat());
+                String blocked = blockedKey(selectedAllowState());
                 tooltip(Component.literal(
                                 I18n.get(blocked != null ? blocked : "gui.z_tweaks.refit.msg.not_owned")),
                         (int) mouseX, (int) mouseY);
@@ -1943,15 +1943,15 @@ public class ZtRefitScreen extends GunRefitScreen {
     }
 
     /** 当前选中候选的兼容档；没有选中项时当作"能装"，让不做额外拦截的调用点保持原行为。 */
-    private Compat selectedCompat() {
+    private AllowState selectedAllowState() {
         Candidate c = selectedCandidate();
-        return c == null ? Compat.OK : c.compat();
+        return c == null ? AllowState.OK : c.allow();
     }
 
     /** 不可安装的角标 / 提示文案 key；能装时为 null。三处（行内角标、标题行、空列表）共用同一串字。 */
     @Nullable
-    private static String blockedKey(Compat compat) {
-        return switch (compat) {
+    private static String blockedKey(AllowState allow) {
+        return switch (allow) {
             case OK -> null;
             case NOT_LISTED -> "gui.z_tweaks.refit.blocked.this";
             case NO_WHITELIST -> "gui.z_tweaks.refit.blocked.slot";
@@ -2444,7 +2444,7 @@ public class ZtRefitScreen extends GunRefitScreen {
             return;
         }
         Candidate entry = candidates.get(Math.min(selected, candidates.size() - 1));
-        String blocked = blockedKey(entry.compat());
+        String blocked = blockedKey(entry.allow());
         if (blocked != null) {
             // 护栏只有这一条，双击 / 安装按钮 / ENTER 都走它：不可安装的件在这里就停住，
             // 不放音效、不发包。服务端那两个包都会静默拒绝（allowAttachment 不过就 return），
@@ -2817,7 +2817,7 @@ public class ZtRefitScreen extends GunRefitScreen {
      * 避免每行重复查索引）、模组命名空间、它在背包里的槽位（-1 = 背包里没有），
      * 以及它对该参数的边际改善量（只在参数排序 / 筛选时算，见 {@link StatCatalog}）。
      */
-    private record Candidate(ItemStack stack, int invSlot, Compat compat, String name, String modId,
+    private record Candidate(ItemStack stack, int invSlot, AllowState allow, String name, String modId,
                              double improvement) {
     }
 
@@ -2830,7 +2830,7 @@ public class ZtRefitScreen extends GunRefitScreen {
      * 类型那层由"槽位本身合不合法"决定（不合法的槽位压暗、点了弹「不支持 X 槽位」，那些配件
      * 压根进不了这个列表），配件锁是枪级标志（锁了就开不了改装界面）。</p>
      */
-    private enum Compat {
+    private enum AllowState {
         /** 能装。 */
         OK,
         /** 枪有白名单，但不含这一个 —— 角标「装不上这个配件」。 */
@@ -2870,7 +2870,7 @@ public class ZtRefitScreen extends GunRefitScreen {
     /** 第一个不可安装的行下标；没有就返回 -1（分隔线画在它的上方）。 */
     private int firstBlockedIndex() {
         for (int i = 0; i < candidates.size(); i++) {
-            if (candidates.get(i).compat() != Compat.OK) {
+            if (candidates.get(i).allow() != AllowState.OK) {
                 return i;
             }
         }
@@ -2880,7 +2880,7 @@ public class ZtRefitScreen extends GunRefitScreen {
     /** 列表里有没有"枪压根没声明白名单"那一档的行 —— 有的话标题行也要说一次那句话。 */
     private boolean hasNoWhitelistRows() {
         for (Candidate c : candidates) {
-            if (c.compat() == Compat.NO_WHITELIST) {
+            if (c.allow() == AllowState.NO_WHITELIST) {
                 return true;
             }
         }
@@ -3321,12 +3321,12 @@ public class ZtRefitScreen extends GunRefitScreen {
             return;
         }
         ItemStack candidate = entry.stack();
-        String key = nameOf(candidate) + "@" + entry.invSlot() + "@" + entry.compat();
+        String key = nameOf(candidate) + "@" + entry.invSlot() + "@" + entry.allow();
         if (!key.equals(attachKey)) {
             attachKey = key;
             attachScroll = 0;
         }
-        String blocked = blockedKey(entry.compat());
+        String blocked = blockedKey(entry.allow());
         List<Component> lines = new ArrayList<>();
         lines.add(Component.literal(nameOf(candidate)).withStyle(ChatFormatting.AQUA));
         // issue #9 的细则 1：必须标出"预览：<件名>"。3D 能自证（枪上真多了个瞄具），数字不能；

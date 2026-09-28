@@ -208,6 +208,27 @@ public record ZtTheme(Id id,
         return onLightPanel() ? darken(base, 0.25f) : mix(base, panelBottom, 0.38f);
     }
 
+    // ------------------------------------------------------------------ 按钮三态
+    // 语义按钮（绿=确认 / 红=取消）的三态底色由"面板底 + 语义色"混出来，跟着主题走。
+    // 原先这十几个色值写死在绘制里，浅色主题下按钮仍是深色 —— ADR-0007 第 3 条要求全部收拢。
+
+    public int buttonTop(int semantic, boolean hovered) {
+        return mix(panelTop, semantic, hovered ? 0.42f : 0.30f);
+    }
+
+    public int buttonBottom(int semantic, boolean hovered) {
+        return mix(panelBottom, semantic, hovered ? 0.42f : 0.30f);
+    }
+
+    public int buttonBorder(int semantic, boolean hovered) {
+        return hovered ? mix(semantic, 0xFFFFFFFF, 0.25f) : withAlpha(0xFFFFFF, 0x66);
+    }
+
+    /** 按钮上的文字：浅色面板上用深墨，深色面板上用白。 */
+    public int buttonText() {
+        return onLightPanel() ? 0xFF10131A : 0xFFFFFFFF;
+    }
+
     // ------------------------------------------------------------------ 颜色小工具
 
     static int withAlpha(int rgb, int alpha) {

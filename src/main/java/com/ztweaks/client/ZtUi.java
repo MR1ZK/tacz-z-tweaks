@@ -241,16 +241,14 @@ public final class ZtUi {
             bottom = ZtTheme.withAlpha(PANEL_BOTTOM, 0x80);
             borderColor = ZtTheme.withAlpha(HAIRLINE, 0x40);
             textColor = TEXT_MUTED;
-        } else if (hovered) {
-            top = primary ? 0xFF2F5F3A : 0xFF6F2F2F;
-            bottom = primary ? 0xFF1F3F27 : 0xFF4F1F1F;
-            borderColor = primary ? 0xFF3F9F4F : 0xFFB04A4A;
-            textColor = 0xFFFFFFFF;
         } else {
-            top = primary ? 0xFF24452C : 0xFF4A2424;
-            bottom = primary ? 0xFF182E1D : 0xFF311818;
-            borderColor = ZtTheme.withAlpha(HAIRLINE, 0x66);
-            textColor = TEXT;
+            // 绿=确认 / 红=取消是语义，但**深浅**必须跟着主题走：这十来个色值原先写死在这里，
+            // 切成浅色主题后按钮还是深底（ADR-0007 第 3 条，review 也点了这一条）。
+            int semantic = primary ? GOOD : BAD;
+            top = current.buttonTop(semantic, hovered);
+            bottom = current.buttonBottom(semantic, hovered);
+            borderColor = current.buttonBorder(semantic, hovered);
+            textColor = hovered ? current.buttonText() : TEXT;
         }
         graphics.fillGradient(rect.x() + 1, rect.y(), rect.x() + rect.w() - 1, rect.y() + rect.h(), top, bottom);
         graphics.fill(rect.x(), rect.y() + 1, rect.x() + 1, rect.y() + rect.h() - 1, top);
