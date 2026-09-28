@@ -110,6 +110,47 @@ public class ZtRefitScreen extends GunRefitScreen {
     private static final int SORT_NAME = 0;
     private static final int SORT_MOD = 1;
     private static final int SORT_STAT_BASE = 2;
+
+    /**
+     * 排序键：把"0/1 是名称 / 模组、≥2 是 {@link StatCatalog#SORTABLE} 下标 + 基准"这套编码
+     * 包成一个值类型。编码本身**不**换成手写枚举 —— 参数项是跟着那张表生成的，手写一份就多一处要维护
+     * （基线味道在这里的正确修法是"包起来"，不是"换枚举"）。弹层里的方向行 / 筛选行也用它承载，
+     * 于是弹层只有一个行列表。
+     */
+    private record SortKey(int code) {
+        static final SortKey NAME = new SortKey(SORT_NAME);
+        static final SortKey MOD = new SortKey(SORT_MOD);
+
+        static SortKey stat(int index) {
+            return new SortKey(SORT_STAT_BASE + index);
+        }
+
+        /** 承载弹层里"不是排序项"的那些行（分隔条 / 方向 / 筛选）。 */
+        static SortKey of(int code) {
+            return new SortKey(code);
+        }
+
+        /** 是不是"能选中的排序项"。控制行的编码与参数项不重叠，但这里仍看定义而不是看范围。 */
+        boolean isOption() {
+            return isName() || isMod() || stat() != null;
+        }
+
+        boolean isName() {
+            return code == SORT_NAME;
+        }
+
+        boolean isMod() {
+            return code == SORT_MOD;
+        }
+
+        /** 参数项对应的定义；名称 / 模组 / 控制行给 null。 */
+        @Nullable
+        StatCatalog.StatDef stat() {
+            int index = code - SORT_STAT_BASE;
+            return index >= 0 && index < StatCatalog.SORTABLE.size() ? StatCatalog.SORTABLE.get(index) : null;
+        }
+    }
+
     /** 排序 / 筛选弹出层：宽度、行高，以及分隔条另算的高度。 */
     private static final int MENU_W = 132;
     private static final int MENU_ROW_H = 11;
@@ -180,7 +221,7 @@ public class ZtRefitScreen extends GunRefitScreen {
      * 候选列表排序偏好：{@link #SORT_NAME} / {@link #SORT_MOD} / 某个参数。
      * 切槽位<b>不</b>清空 —— 排序是玩家的全局习惯，不是某个槽位的属性（与搜索词相反）。
      */
-    private int sortKey = SORT_NAME;
+    private SortKey sortKey = SortKey.NAME;
     /** 方向：true = 优→劣。名称/模组这两项没有"优劣"可言，就是 A-Z / Z-A。 */
     private boolean sortBestFirst = true;
     /** 筛选：只看对该参数有改善的配件。只对参数排序有意义，名称/模组下那一行置灰。 */
@@ -355,19 +396,19 @@ public class ZtRefitScreen extends GunRefitScreen {
      *
      * <p>静态建一次 —— 它每帧都要被绘制与命中检测各走一遍，没必要每帧重建。</p>
      */
-    private static final List<Integer> SORT_MENU_ROWS = buildSortMenuRows();
+    private static final List<SortKey> SORT_MENU_ROWS = buildSortMenuRows();
 
-    private static List<Integer> buildSortMenuRows() {
-        List<Integer> rows = new ArrayList<>();
-        rows.add(SORT_NAME);
-        rows.add(SORT_MOD);
-        rows.add(MENU_SEP);
+    private static List<SortKey> buildSortMenuRows() {
+        List<SortKey> rows = new ArrayList<>();
+        rows.add(SortKey.NAME);
+        rows.add(SortKey.MOD);
+        rows.add(SortKey.of(MENU_SEP));
         for (int i = 0; i < StatCatalog.SORTABLE.size(); i++) {
-            rows.add(SORT_STAT_BASE + i);
+            rows.add(SortKey.stat(i));
         }
-        rows.add(MENU_SEP);
-        rows.add(MENU_DIR);
-        rows.add(MENU_FILTER);
+        rows.add(SortKey.of(MENU_SEP));
+        rows.add(SortKey.of(MENU_DIR));
+        rows.add(SortKey.of(MENU_FILTER));
         return List.copyOf(rows);
     }
 
@@ -383,7 +424,7 @@ public class ZtRefitScreen extends GunRefitScreen {
      * <p>改完必须把 {@code cachedType} 置空触发下一帧重建 —— 候选列表按槽位类型缓存，
      * 不置空的话排序不会立即生效。</p>
      */
-    private void selectSortKey(int key) {
+    private void selectSortKey(SortKey key) {
         sortKey = key;
         invalidateCandidates();
     }
@@ -400,39 +441,39 @@ public class ZtRefitScreen extends GunRefitScreen {
 
     /** 排序按钮上的文字：名称/模组沿用 A-Z / Z-A，参数项写成"后坐力 优→劣"。 */
     private String sortLabel() {
-        if (sortKey == SORT_NAME || sortKey == SORT_MOD) {
-            String field = sortKey == SORT_NAME ? "name" : "mod";
+        if (sortKey.isName() || sortKey.isMod()) {
+            String field = sortKey.isName() ? "name" : "mod";
             return I18n.get("gui.z_tweaks.refit.sort." + field + (sortBestFirst ? ".asc" : ".desc"));
         }
-        StatCatalog.StatDef stat = statOf(sortKey);
+        StatCatalog.StatDef stat = sortKey.stat();
         String name = stat == null ? "" : I18n.get(stat.langKey());
         return I18n.get("gui.z_tweaks.refit.sort.stat", name,
                 I18n.get("gui.z_tweaks.refit.sort." + (sortBestFirst ? "best" : "worst")));
     }
 
     /** 弹出层一行的文字。方向行与筛选行把当前状态写在冒号后面，不另占控件。 */
-    private String sortMenuLabel(int key) {
-        if (key == SORT_NAME) {
+    private String sortMenuLabel(SortKey key) {
+        if (key.isName()) {
             return I18n.get("gui.z_tweaks.refit.sort.key.name");
         }
-        if (key == SORT_MOD) {
+        if (key.isMod()) {
             return I18n.get("gui.z_tweaks.refit.sort.key.mod");
         }
-        if (key == MENU_DIR) {
+        if (key.code() == MENU_DIR) {
             return I18n.get("gui.z_tweaks.refit.sort.dir",
                     I18n.get("gui.z_tweaks.refit.sort." + (sortBestFirst ? "best" : "worst")));
         }
-        if (key == MENU_FILTER) {
+        if (key.code() == MENU_FILTER) {
             return I18n.get("gui.z_tweaks.refit.sort.filter",
                     I18n.get("gui.z_tweaks.refit.sort.filter." + (onlyImproving ? "on" : "off")));
         }
-        StatCatalog.StatDef stat = statOf(key);
+        StatCatalog.StatDef stat = key.stat();
         return stat == null ? "" : I18n.get(stat.langKey());
     }
 
     /** 该行是不是"当前选中的排序键"。方向行 / 筛选行不是选项，永远不高亮。 */
-    private boolean isSortKeyActive(int key) {
-        return key >= SORT_NAME && key == sortKey;
+    private boolean isSortKeyActive(SortKey key) {
+        return key.isOption() && key.equals(sortKey);
     }
 
     /**
@@ -440,14 +481,14 @@ public class ZtRefitScreen extends GunRefitScreen {
      * 这一行此时置灰并忽略点击 —— 与其藏起来让弹出层高度跳变，不如留着位置。
      */
     private boolean filterAvailable() {
-        return statOf(sortKey) != null;
+        return sortKey.stat() != null;
     }
 
     /** 弹出层内容的总高度（十四行 + 两个分隔条 + 上下内边距），不受视口限制。 */
     private static int sortMenuContentHeight() {
         int height = MENU_PAD * 2;
-        for (int key : SORT_MENU_ROWS) {
-            height += key == MENU_SEP ? MENU_SEP_H : MENU_ROW_H;
+        for (SortKey key : SORT_MENU_ROWS) {
+            height += key.code() == MENU_SEP ? MENU_SEP_H : MENU_ROW_H;
         }
         return height;
     }
@@ -479,29 +520,29 @@ public class ZtRefitScreen extends GunRefitScreen {
         return Math.max(0, sortMenuContentHeight() - sortMenuRect().h());
     }
 
-    /** 弹出层里鼠标落在哪一行（已算上滚动偏移）；落在内边距或分隔条上返回 {@link #MENU_NONE}。 */
-    private int sortMenuKeyAt(double mouseX, double mouseY) {
+    /** 弹出层里鼠标落在哪一行（已算上滚动偏移）；落在内边距或分隔条上返回"空"这一行。 */
+    private SortKey sortMenuKeyAt(double mouseX, double mouseY) {
         Rect menu = sortMenuRect();
         if (!menu.contains(mouseX, mouseY)) {
-            return MENU_NONE;
+            return SortKey.of(MENU_NONE);
         }
         int contentY = (int) (mouseY - menu.y()) + sortMenuScroll;
         int y = MENU_PAD;
-        for (int key : SORT_MENU_ROWS) {
-            int height = key == MENU_SEP ? MENU_SEP_H : MENU_ROW_H;
+        for (SortKey key : SORT_MENU_ROWS) {
+            int height = key.code() == MENU_SEP ? MENU_SEP_H : MENU_ROW_H;
             if (contentY >= y && contentY < y + height) {
-                return key == MENU_SEP ? MENU_NONE : key;
+                return key.code() == MENU_SEP ? SortKey.of(MENU_NONE) : key;
             }
             y += height;
         }
-        return MENU_NONE;
+        return SortKey.of(MENU_NONE);
     }
 
     /** 点在弹出层的某一行上：排序项 = 选它，方向行 / 筛选行 = 翻转。 */
-    private void clickSortMenu(int key) {
-        if (key == MENU_DIR) {
+    private void clickSortMenu(SortKey key) {
+        if (key.code() == MENU_DIR) {
             toggleSortDirection();
-        } else if (key == MENU_FILTER) {
+        } else if (key.code() == MENU_FILTER) {
             if (filterAvailable()) {
                 toggleImprovingFilter();
             }
@@ -618,7 +659,7 @@ public class ZtRefitScreen extends GunRefitScreen {
         boolean noWhitelist = whitelistEmpty(iGun.getGunId(gun));
         // 参数排序 / 筛选才需要逐候选跑一次属性求值。名称/模组排序下这一整段都不执行，
         // 一分钱不花。
-        StatCatalog.StatDef stat = statOf(sortKey);
+        StatCatalog.StatDef stat = sortKey.stat();
         GunData gunData = null;
         AttachmentCacheProperty base = null;
         if (stat != null) {
@@ -709,10 +750,10 @@ public class ZtRefitScreen extends GunRefitScreen {
      */
     private Comparator<Candidate> candidateComparator() {
         Comparator<Candidate> byField;
-        if (sortKey == SORT_NAME) {
+        if (sortKey.isName()) {
             byField = Comparator.comparing((Candidate c) -> c.name().toLowerCase(Locale.ROOT))
                     .thenComparing(c -> c.modId().toLowerCase(Locale.ROOT));
-        } else if (sortKey == SORT_MOD) {
+        } else if (sortKey.isMod()) {
             byField = Comparator.comparing((Candidate c) -> c.modId().toLowerCase(Locale.ROOT))
                     .thenComparing(c -> c.name().toLowerCase(Locale.ROOT));
         } else {
@@ -724,7 +765,7 @@ public class ZtRefitScreen extends GunRefitScreen {
         }
         // 方向开关的两种含义：名称/模组下 sortBestFirst = A-Z（升序），
         // 参数项下 sortBestFirst = 优→劣（降序）。不区分的话，按后坐力排序会变成"最差的在最前"。
-        boolean ascending = sortKey == SORT_NAME || sortKey == SORT_MOD ? sortBestFirst : !sortBestFirst;
+        boolean ascending = sortKey.isName() || sortKey.isMod() ? sortBestFirst : !sortBestFirst;
         if (!ascending) {
             byField = byField.reversed();
         }
@@ -1465,6 +1506,7 @@ public class ZtRefitScreen extends GunRefitScreen {
     }
 
     private List<Integer> themeMenuRows() {
+        // 主题弹层的行是"主题序号 + 固定动作"，跟排序键无关 —— 上一轮批量替换误伤了这一行，已还原
         List<Integer> rows = new ArrayList<>();
         for (int i = 0; i < ZtTheme.Id.values().length; i++) {
             rows.add(i);
@@ -1641,6 +1683,7 @@ public class ZtRefitScreen extends GunRefitScreen {
     }
 
     private List<Integer> presetMenuRows() {
+        // 预设弹层的行是"预设序号 + 固定动作"，与排序键无关 —— 批量替换误伤了这一行，已还原
         List<Integer> rows = new ArrayList<>();
         for (int i = 0; i < presets.size(); i++) {
             rows.add(i);
@@ -1847,14 +1890,14 @@ public class ZtRefitScreen extends GunRefitScreen {
         graphics.enableScissor(menu.x() + 1, menu.y() + 1, menu.x() + menu.w() - 1, menu.y() + menu.h() - 1);
         boolean inside = menu.contains(mouseX, mouseY);
         int y = menu.y() + MENU_PAD - sortMenuScroll;
-        for (int key : SORT_MENU_ROWS) {
-            int height = key == MENU_SEP ? MENU_SEP_H : MENU_ROW_H;
-            if (key == MENU_SEP) {
+        for (SortKey key : SORT_MENU_ROWS) {
+            int height = key.code() == MENU_SEP ? MENU_SEP_H : MENU_ROW_H;
+            if (key.code() == MENU_SEP) {
                 graphics.fill(menu.x() + 4, y + 1, menu.x() + menu.w() - 4, y + 2, HAIRLINE);
             } else {
                 boolean hovered = inside && mouseY >= y && mouseY < y + height;
                 // 不可用的行（没选参数时的筛选开关）画得更暗，但保留位置，避免展开高度跳变
-                boolean usable = key != MENU_FILTER || filterAvailable();
+                boolean usable = key.code() != MENU_FILTER || filterAvailable();
                 boolean selected = isSortKeyActive(key);
                 int color = selected ? ACCENT : (hovered ? TEXT : TEXT_DIM);
                 if (hovered && usable) {
@@ -2192,8 +2235,8 @@ public class ZtRefitScreen extends GunRefitScreen {
             if (candidateListVisible() && sortMenuRect().contains(mouseX, mouseY)) {
                 // 落在分隔条或内边距上也算"点在弹层里"：吃掉这一下，但既不做事也不收起 ——
                 // 否则想点某一行、手抖偏到分隔条上就把整个弹层关了。
-                int key = sortMenuKeyAt(mouseX, mouseY);
-                if (key != MENU_NONE) {
+                SortKey key = sortMenuKeyAt(mouseX, mouseY);
+                if (key.code() != MENU_NONE) {
                     clickSortMenu(key);
                 }
                 return true;
