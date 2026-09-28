@@ -154,9 +154,12 @@ public record ZtTheme(Id id,
         return onLightPanel() ? darken(textMuted, 0.45f) : textMuted;
     }
 
-    /** 不可安装的角标 / 提示文字：浅色面板上先加深，保证还是"红褐"而不是"浅灰"。 */
+    /**
+     * 不可安装的角标 / 提示文字：浅色面板上只**微微**加深。加深多了会把这档从"红"洗成"近黑"，
+     * 反而丢掉"这里不能用"的辨识度 —— Win 经典实机反馈就是"颜色不够醒目"。
+     */
     public int blockedInk() {
-        return onLightPanel() ? darken(blocked, 0.45f) : blocked;
+        return onLightPanel() ? darken(blocked, 0.15f) : blocked;
     }
 
     /** 上下暗角（3D 预览区压暗用）。 */
@@ -191,15 +194,18 @@ public record ZtTheme(Id id,
         return text;
     }
 
-    /** 失效槽位（枪不支持该槽位）的边框与文字：比不可安装更沉，一眼是"这里没有"。 */
+    /**
+     * 失效槽位（枪不支持该槽位）的边框与文字：深色面板上比不可安装更沉（一眼是"这里没有"）；
+     * 浅色面板上边框**直接用这档红本身** —— 红得明确才一眼看得出，压深等于又变回浅灰系。
+     */
     public int brokenBorder() {
         int base = blockedInk();
-        return onLightPanel() ? darken(base, 0.55f) : mix(base, panelBottom, 0.63f);
+        return onLightPanel() ? base : mix(base, panelBottom, 0.63f);
     }
 
     public int brokenText() {
         int base = blockedInk();
-        return onLightPanel() ? darken(base, 0.30f) : mix(base, panelBottom, 0.38f);
+        return onLightPanel() ? darken(base, 0.25f) : mix(base, panelBottom, 0.38f);
     }
 
     // ------------------------------------------------------------------ 颜色小工具
@@ -257,11 +263,16 @@ public record ZtTheme(Id id,
             0xFF8BE07A, 0xFFFF9A8A, 0xFFC98A8A, 0x22EAF9FF, 0x33FFFFFF,
             0xD92A6E96, 0x99E8FAFF, 0x33FFFFFF);
 
-    /** Win 经典：银灰浮雕面板 + 标题栏藏青，直角、无渐变。 */
+    /**
+     * Win 经典：银灰浮雕面板 + 标题栏藏青，直角、无渐变。
+     *
+     * <p>这一套的"不可用"用**Windows 错误图标的红**（{@code #E81123}）：银灰底上红褐太糊，
+     * 实机反馈是"看不出这个槽位不能用"。其余主题仍用各自的红褐色。</p>
+     */
     private static final ZtTheme WIN_CLASSIC = new ZtTheme(Id.WIN_CLASSIC,
             0xFFC0C0C0, 0xFFC0C0C0, Surface.SOLID, 0, 0xFF808080,
             0xFF000080, 0xFF000000, 0xFF303030, 0xFF5A5A5A,
-            0xFF008000, 0xFF800000, 0xFF7A4A4A, 0x22000000, 0x22000000,
+            0xFF008000, 0xFF800000, 0xFFE81123, 0x22000000, 0x22000000,
             0xFFC0C0C0, 0xFF808080, 0x22000000);
 
     /** 按 id 取主题定义。 */
