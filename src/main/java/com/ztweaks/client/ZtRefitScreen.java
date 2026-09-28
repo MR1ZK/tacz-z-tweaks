@@ -1062,8 +1062,8 @@ public class ZtRefitScreen extends GunRefitScreen {
      * 只给"上缘调色、下缘操作区"提供一点对比度。
      */
     private void drawVignette(GuiGraphics graphics) {
-        graphics.fillGradient(0, 0, this.width, 52, 0x99000000, 0x00000000);
-        graphics.fillGradient(0, detailY() - 6, this.width, this.height, 0x00000000, 0xAA000000);
+        graphics.fillGradient(0, 0, this.width, 52, VIGNETTE, 0x00000000);
+        graphics.fillGradient(0, detailY() - 6, this.width, this.height, 0x00000000, ZtTheme.withAlpha(VIGNETTE, 0xAA));
     }
 
     /** 登记一个本帧末尾才渲染的 tooltip（绘制顺序：必须先画完所有面板）。 */
@@ -1123,14 +1123,14 @@ public class ZtRefitScreen extends GunRefitScreen {
             boolean allowed = iGun != null && iGun.allowAttachmentType(gun, type);
 
             if (allowed) {
-                int fill = isCurrent ? ACCENT_SOFT : (hovered ? HOVER_OVERLAY : 0x22000000);
+                int fill = isCurrent ? ACCENT_SOFT : (hovered ? HOVER_OVERLAY : SLOT_BG);
                 roundedFill(graphics, rect.x(), rect.y(), rect.w(), rect.h(), fill);
                 roundedBorder(graphics, rect.x(), rect.y(), rect.w(), rect.h(),
-                        isCurrent ? ACCENT : (hovered ? 0x88FFFFFF : BORDER_STRONG));
+                        isCurrent ? ACCENT : (hovered ? WHITE_OVERLAY : BORDER_STRONG));
             } else {
                 // 不支持的槽位：压暗 + 红褐描边，一眼看出点不动（点了也会弹提示）
-                roundedFill(graphics, rect.x(), rect.y(), rect.w(), rect.h(), 0x55000000);
-                roundedBorder(graphics, rect.x(), rect.y(), rect.w(), rect.h(), 0xFF3A2424);
+                roundedFill(graphics, rect.x(), rect.y(), rect.w(), rect.h(), SHADOW);
+                roundedBorder(graphics, rect.x(), rect.y(), rect.w(), rect.h(), BROKEN_BORDER);
             }
 
             ItemStack installed = iGun == null ? ItemStack.EMPTY : iGun.getAttachment(gun, type);
@@ -1138,11 +1138,11 @@ public class ZtRefitScreen extends GunRefitScreen {
                 graphics.renderItem(installed, rect.x() + 3, rect.y() + 3);
             } else {
                 graphics.drawCenteredString(this.font, "+", rect.x() + rect.w() / 2, rect.y() + 7,
-                        allowed ? TEXT_MUTED : 0xFF5A3A3A);
+                        allowed ? TEXT_MUTED : BROKEN_TEXT);
             }
 
             String label = truncate(slotName(type), step - 2);
-            int labelColor = !allowed ? 0xFF8A5A5A : (isCurrent ? ACCENT : (hovered ? TEXT : TEXT_DIM));
+            int labelColor = !allowed ? BLOCKED : (isCurrent ? ACCENT : (hovered ? TEXT : TEXT_DIM));
             graphics.drawCenteredString(this.font, label, rect.x() + rect.w() / 2, y - 10, labelColor);
             // 当前槽位用名字下的强调线标记，比整块高亮更克制、也更不抢枪的视觉
             if (isCurrent) {
@@ -1195,7 +1195,7 @@ public class ZtRefitScreen extends GunRefitScreen {
         String count = String.valueOf(candidates.size());
         int badgeW = this.font.width(count) + 9;
         int badgeX = right - 7 - badgeW;
-        roundedFill(graphics, badgeX, y + 2, badgeW, 10, 0x40000000);
+        roundedFill(graphics, badgeX, y + 2, badgeW, 10, BADGE_BG);
         roundedBorder(graphics, badgeX, y + 2, badgeW, 10, HAIRLINE);
         graphics.drawCenteredString(this.font, count, badgeX + badgeW / 2, y + 3, TEXT_DIM);
         // 「这里装不了配件」是整个槽位的事：逐行贴同一句话是成片的重复，标题行说一次。
@@ -1254,7 +1254,7 @@ public class ZtRefitScreen extends GunRefitScreen {
                 // 不可安装那批的上面压一条线把它隔开：不折叠、不分组，一条线就够了。
                 // 画在行间那 2px 的缝里，不额外吃一行高度；铺满整条缝才看得见（早先只画 1px、
                 // 40% 白，实机反馈是"没看见"）。
-                graphics.fill(row.x() + 2, row.y() - 2, row.x() + row.w() - 2, row.y(), 0x99FFFFFF);
+                graphics.fill(row.x() + 2, row.y() - 2, row.x() + row.w() - 2, row.y(), DIVIDER);
             }
             if (isSelected) {
                 roundedFill(graphics, row.x(), row.y(), row.w(), row.h(), ACCENT_SOFT);
@@ -1264,14 +1264,14 @@ public class ZtRefitScreen extends GunRefitScreen {
             // 左侧强调竖条：选中用强调色、悬停白 —— 比整行铺色精细，也不干扰阅读
             if (isSelected || hovered) {
                 graphics.fill(row.x(), row.y() + 1, row.x() + 2, row.y() + row.h() - 1,
-                        isSelected ? ACCENT : 0x88FFFFFF);
+                        isSelected ? ACCENT : WHITE_OVERLAY);
             }
             graphics.renderItem(entry.stack(), row.x() + 5, row.y() + 1);
             if (!installable) {
                 // 图标盖一层半透明黑：点不动的行才有 —— 没带在身上的（服务端取不到件）
                 // 与不可安装的（服务端两份包都会拒）。不标出来会让"能预览"被误读成"能装"。
                 // 前者只在创造模式看得到，后者只在玩家真握着它时出现。
-                graphics.fill(row.x() + 5, row.y() + 1, row.x() + 21, row.y() + 17, 0x80000000);
+                graphics.fill(row.x() + 5, row.y() + 1, row.x() + 21, row.y() + 17, ICON_DIM);
             }
             // 名字在 rebuildCandidates 里已经算好存在 Candidate 上，这里直接用，不再逐帧查索引
             String name = entry.name();
@@ -1297,7 +1297,7 @@ public class ZtRefitScreen extends GunRefitScreen {
             graphics.fill(trackX, trackTop, trackX + 2, trackTop + trackH, TRACK_BG);
             int thumbH = Math.max(8, trackH * rows / candidates.size());
             int thumbY = trackTop + Math.round((trackH - thumbH) * (scroll / (float) maxScroll));
-            graphics.fill(trackX, thumbY, trackX + 2, thumbY + thumbH, 0xAA55FFFF);
+            graphics.fill(trackX, thumbY, trackX + 2, thumbY + thumbH, ACCENT_MARK);
         }
 
         // 搜索框：面板是在 super.render 之后画的，不在这里补画一次会被面板盖住
@@ -1343,8 +1343,8 @@ public class ZtRefitScreen extends GunRefitScreen {
         Rect rect = presetRect();
         boolean hovered = !dragging && rect.contains(mouseX, mouseY);
         boolean active = hovered || presetMenuOpen;
-        roundedFill(graphics, rect.x(), rect.y(), rect.w(), rect.h(), active ? 0x40FFFFFF : 0x40000000);
-        roundedBorder(graphics, rect.x(), rect.y(), rect.w(), rect.h(), active ? 0x88FFFFFF : HAIRLINE);
+        roundedFill(graphics, rect.x(), rect.y(), rect.w(), rect.h(), active ? BADGE_BG_ACTIVE : BADGE_BG);
+        roundedBorder(graphics, rect.x(), rect.y(), rect.w(), rect.h(), active ? WHITE_OVERLAY : HAIRLINE);
         graphics.drawCenteredString(this.font, I18n.get("gui.z_tweaks.refit.preset.button"),
                 rect.x() + rect.w() / 2, rect.y() + 2, active ? TEXT : TEXT_DIM);
         if (hovered) {
@@ -1410,8 +1410,8 @@ public class ZtRefitScreen extends GunRefitScreen {
     private void drawPresetMenu(GuiGraphics graphics, int mouseX, int mouseY) {
         Rect menu = presetMenuRect();
         presetMenuScroll = Mth.clamp(presetMenuScroll, 0, presetMenuMaxScroll());
-        roundedFill(graphics, menu.x(), menu.y(), menu.w(), menu.h(), 0xF0101010);
-        roundedBorder(graphics, menu.x(), menu.y(), menu.w(), menu.h(), 0x88FFFFFF);
+        roundedFill(graphics, menu.x(), menu.y(), menu.w(), menu.h(), MENU_BG);
+        roundedBorder(graphics, menu.x(), menu.y(), menu.w(), menu.h(), MENU_BORDER);
         graphics.enableScissor(menu.x() + 1, menu.y() + 1, menu.x() + menu.w() - 1, menu.y() + menu.h() - 1);
         boolean inside = menu.contains(mouseX, mouseY);
         int hoveredKey = inside ? presetMenuKeyAt(mouseX, mouseY) : PM_NONE;
@@ -1423,7 +1423,7 @@ public class ZtRefitScreen extends GunRefitScreen {
             } else {
                 boolean hovered = inside && mouseY >= y && mouseY < y + height;
                 if (hovered) {
-                    roundedFill(graphics, menu.x() + 2, y, menu.w() - 4, height, 0x20FFFFFF);
+                    roundedFill(graphics, menu.x() + 2, y, menu.w() - 4, height, MENU_HOVER);
                 }
                 // 预设行：左键应用、右键删除 —— 与候选行的"右键=卸下"同一族手势
                 graphics.drawString(this.font, truncate(presetMenuLabel(key, hoveredKey), menu.w() - 16),
@@ -1433,11 +1433,11 @@ public class ZtRefitScreen extends GunRefitScreen {
         }
         graphics.disableScissor();
         if (presetMenuScroll > 0) {
-            graphics.fill(menu.x() + 1, menu.y() + 1, menu.x() + menu.w() - 1, menu.y() + 3, 0x66000000);
+            graphics.fill(menu.x() + 1, menu.y() + 1, menu.x() + menu.w() - 1, menu.y() + 3, MENU_SCROLL_HINT);
         }
         if (presetMenuScroll < presetMenuMaxScroll()) {
             graphics.fill(menu.x() + 1, menu.y() + menu.h() - 3,
-                    menu.x() + menu.w() - 1, menu.y() + menu.h() - 1, 0x66000000);
+                    menu.x() + menu.w() - 1, menu.y() + menu.h() - 1, MENU_SCROLL_HINT);
         }
     }
 
@@ -1515,8 +1515,8 @@ public class ZtRefitScreen extends GunRefitScreen {
 
     private void drawPresetConfirm(GuiGraphics graphics, int mouseX, int mouseY) {
         Rect panel = presetConfirmRect();
-        roundedFill(graphics, panel.x(), panel.y(), panel.w(), panel.h(), 0xF0101010);
-        roundedBorder(graphics, panel.x(), panel.y(), panel.w(), panel.h(), 0x88FFFFFF);
+        roundedFill(graphics, panel.x(), panel.y(), panel.w(), panel.h(), MENU_BG);
+        roundedBorder(graphics, panel.x(), panel.y(), panel.w(), panel.h(), MENU_BORDER);
         List<String> lines = presetConfirmLines();
         for (int i = 0; i < lines.size(); i++) {
             graphics.drawString(this.font, truncate(lines.get(i), panel.w() - 14),
@@ -1535,8 +1535,8 @@ public class ZtRefitScreen extends GunRefitScreen {
         Rect rect = sortRect();
         boolean hovered = !dragging && rect.contains(mouseX, mouseY);
         boolean active = hovered || sortMenuOpen;
-        roundedFill(graphics, rect.x(), rect.y(), rect.w(), rect.h(), active ? 0x40FFFFFF : 0x40000000);
-        roundedBorder(graphics, rect.x(), rect.y(), rect.w(), rect.h(), active ? 0x88FFFFFF : HAIRLINE);
+        roundedFill(graphics, rect.x(), rect.y(), rect.w(), rect.h(), active ? BADGE_BG_ACTIVE : BADGE_BG);
+        roundedBorder(graphics, rect.x(), rect.y(), rect.w(), rect.h(), active ? WHITE_OVERLAY : HAIRLINE);
         graphics.drawCenteredString(this.font, truncate(sortLabel(), rect.w() - 6),
                 rect.x() + rect.w() / 2, rect.y() + 2, active ? TEXT : TEXT_DIM);
         if (hovered) {
@@ -1554,8 +1554,8 @@ public class ZtRefitScreen extends GunRefitScreen {
     private void drawSortMenu(GuiGraphics graphics, int mouseX, int mouseY) {
         Rect menu = sortMenuRect();
         sortMenuScroll = Mth.clamp(sortMenuScroll, 0, sortMenuMaxScroll());
-        roundedFill(graphics, menu.x(), menu.y(), menu.w(), menu.h(), 0xF0101010);
-        roundedBorder(graphics, menu.x(), menu.y(), menu.w(), menu.h(), 0x88FFFFFF);
+        roundedFill(graphics, menu.x(), menu.y(), menu.w(), menu.h(), MENU_BG);
+        roundedBorder(graphics, menu.x(), menu.y(), menu.w(), menu.h(), MENU_BORDER);
         // 内容可能高过视口（见 sortMenuRect），超出部分一律裁掉，而不是画到面板外面去
         graphics.enableScissor(menu.x() + 1, menu.y() + 1, menu.x() + menu.w() - 1, menu.y() + menu.h() - 1);
         boolean inside = menu.contains(mouseX, mouseY);
@@ -1571,7 +1571,7 @@ public class ZtRefitScreen extends GunRefitScreen {
                 boolean selected = isSortKeyActive(key);
                 int color = selected ? ACCENT : (hovered ? TEXT : TEXT_DIM);
                 if (hovered && usable) {
-                    roundedFill(graphics, menu.x() + 2, y, menu.w() - 4, height, 0x20FFFFFF);
+                    roundedFill(graphics, menu.x() + 2, y, menu.w() - 4, height, MENU_HOVER);
                 }
                 graphics.drawString(this.font, truncate(sortMenuLabel(key), menu.w() - 22),
                         menu.x() + 8, y + 2, usable ? color : TEXT_MUTED, false);
@@ -1584,10 +1584,10 @@ public class ZtRefitScreen extends GunRefitScreen {
         graphics.disableScissor();
         // 上/下沿还有没露出来的行时压一条暗条当提示。刻意不用箭头字形——不押注默认字体里有没有那个码位。
         if (sortMenuScroll > 0) {
-            graphics.fill(menu.x() + 1, menu.y() + 1, menu.x() + menu.w() - 1, menu.y() + 3, 0x66000000);
+            graphics.fill(menu.x() + 1, menu.y() + 1, menu.x() + menu.w() - 1, menu.y() + 3, MENU_SCROLL_HINT);
         }
         if (sortMenuScroll < sortMenuMaxScroll()) {
-            graphics.fill(menu.x() + 1, menu.y() + menu.h() - 3, menu.x() + menu.w() - 1, menu.y() + menu.h() - 1, 0x66000000);
+            graphics.fill(menu.x() + 1, menu.y() + menu.h() - 3, menu.x() + menu.w() - 1, menu.y() + menu.h() - 1, MENU_SCROLL_HINT);
         }
     }
 
@@ -1743,11 +1743,11 @@ public class ZtRefitScreen extends GunRefitScreen {
                 widest = Math.max(widest, this.font.width(text));
             }
             // 诊断文字直接盖在世界上会糊成一片，垫一层半透明底衬
-            roundedFill(graphics, PAD - 3, 4, widest + 8, lines.size() * 10 + 6, 0x90000000);
+            roundedFill(graphics, PAD - 3, 4, widest + 8, lines.size() * 10 + 6, HUD_BG);
             roundedBorder(graphics, PAD - 3, 4, widest + 8, lines.size() * 10 + 6, HAIRLINE);
             int y = 8;
             for (String text : lines) {
-                graphics.drawString(this.font, text, PAD, y, 0xFF7FE7FF, true);
+                graphics.drawString(this.font, text, PAD, y, HUD_TEXT, true);
                 y += 10;
             }
         }
@@ -1771,10 +1771,10 @@ public class ZtRefitScreen extends GunRefitScreen {
         int h = 14;
         int x = (this.width - w) / 2;
         int y = detailY() - h - 8;
-        roundedFill(graphics, x, y, w, h, (alpha << 24) | 0x14171B);
-        roundedBorder(graphics, x, y, w, h, (alpha << 24) | 0x4A5158);
-        graphics.fill(x + 1, y + 1, x + 3, y + h - 1, (alpha << 24) | 0x55FFFF);
-        graphics.drawCenteredString(this.font, popup, x + w / 2 + 1, y + 3, (alpha << 24) | 0xBFF7FF);
+        roundedFill(graphics, x, y, w, h, ZtTheme.withAlpha(TOAST_BG, alpha));
+        roundedBorder(graphics, x, y, w, h, ZtTheme.withAlpha(TOAST_EDGE, alpha));
+        graphics.fill(x + 1, y + 1, x + 3, y + h - 1, ZtTheme.withAlpha(ACCENT, alpha));
+        graphics.drawCenteredString(this.font, popup, x + w / 2 + 1, y + 3, ZtTheme.withAlpha(ACCENT_LIGHT, alpha));
     }
 
     /** 诊断 HUD 用：随意配件那条桥的状态（没装 addon / 装了但接不上 / 生效中 / 未生效）。 */
@@ -2939,7 +2939,7 @@ public class ZtRefitScreen extends GunRefitScreen {
             infoScroll[c] = Mth.clamp(infoScroll[c], 0, Math.max(0, lines.size() - INFO_ROWS));
             for (int i = infoScroll[c]; i < Math.min(lines.size(), infoScroll[c] + INFO_ROWS); i++) {
                 graphics.drawString(this.font, lines.get(i), (int) localLeft,
-                        (i - infoScroll[c]) * INFO_LINE_H, 0xFFFFFF, false);
+                        (i - infoScroll[c]) * INFO_LINE_H, TEXT, false);
             }
             localLeft += localWidth;
         }
@@ -3013,7 +3013,7 @@ public class ZtRefitScreen extends GunRefitScreen {
         pose.translate(x + 26, y + 4, 0);
         pose.scale(INFO_SCALE, INFO_SCALE, 1f);
         for (int i = attachScroll; i < Math.min(wrapped.size(), attachScroll + rows); i++) {
-            graphics.drawString(this.font, wrapped.get(i), 0, (i - attachScroll) * INFO_LINE_H, 0xFFFFFF, false);
+            graphics.drawString(this.font, wrapped.get(i), 0, (i - attachScroll) * INFO_LINE_H, TEXT, false);
         }
         pose.popPose();
     }

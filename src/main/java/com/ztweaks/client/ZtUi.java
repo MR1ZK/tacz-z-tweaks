@@ -79,6 +79,15 @@ public final class ZtUi {
     /** 失效槽位（枪不支持）的边框与文字。 */
     public static int BROKEN_BORDER = 0xFF3A2424;
     public static int BROKEN_TEXT = 0xFF5A3A3A;
+    /** 槽位底、徽标底与按钮底、按钮激活底（浅色面板会换成压暗的那一档）。 */
+    public static int SLOT_BG = 0x22000000;
+    public static int BADGE_BG = 0x40000000;
+    public static int BADGE_BG_ACTIVE = 0x40FFFFFF;
+    /** 图标上的灰罩（行点不动）、强调色滑块、弹层滚动提示条、弹条描边。 */
+    public static int ICON_DIM = 0x80000000;
+    public static int ACCENT_MARK = 0xAA55FFFF;
+    public static int MENU_SCROLL_HINT = 0x66000000;
+    public static int TOAST_EDGE = 0xFF4A5158;
 
     /** 圆角半径（0 = 直角）与面板质感。 */
     public static int CORNER = 1;
@@ -146,6 +155,13 @@ public final class ZtUi {
         TOAST_TEXT = theme.toastText();
         BROKEN_BORDER = theme.brokenBorder();
         BROKEN_TEXT = theme.brokenText();
+        SLOT_BG = theme.slotBg();
+        BADGE_BG = theme.badgeBg();
+        BADGE_BG_ACTIVE = theme.badgeBgActive();
+        ICON_DIM = theme.iconDim();
+        ACCENT_MARK = theme.accentMark();
+        MENU_SCROLL_HINT = theme.menuScrollHint();
+        TOAST_EDGE = theme.toastEdge();
         CORNER = theme.corner();
         SURFACE = theme.surface();
     }

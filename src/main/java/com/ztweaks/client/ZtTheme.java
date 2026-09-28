@@ -89,9 +89,44 @@ public record ZtTheme(Id id,
         return luminance(accent) > 0.55f ? 0xFF11141A : 0xFFFFFFFF;
     }
 
-    /** 面板上的暗色衬底（槽位底、滚动条槽、暗角）：由面板底色压暗而来，跟着主题走。 */
+    /** 面板上的暗色衬底（槽位底、暗角）：由面板底色压暗而来，跟着主题走。 */
     public int shadow() {
-        return withAlpha(darken(panelBottom, 0.55f), 0x88);
+        return withAlpha(darken(panelBottom, 0.55f), 0x55);
+    }
+
+    /** 槽位条上"既不是当前、也没有悬停"的槽位底：比面板再沉一点。 */
+    public int slotBg() {
+        return withAlpha(0xFF000000, onLightPanel() ? 0x18 : 0x22);
+    }
+
+    /** 数量徽标、按钮常态底这类"比面板再沉一档"的底。 */
+    public int badgeBg() {
+        return withAlpha(0xFF000000, onLightPanel() ? 0x22 : 0x40);
+    }
+
+    /** 按钮激活（弹层开着、当前页）的底：深色面板提亮、浅色面板压暗，两边都看得见。 */
+    public int badgeBgActive() {
+        return onLightPanel() ? withAlpha(0xFF000000, 0x33) : withAlpha(0xFFFFFF, 0x40);
+    }
+
+    /** 图标上的灰罩：表示"这一行点不动"。 */
+    public int iconDim() {
+        return withAlpha(0xFF000000, 0x80);
+    }
+
+    /** 滑块之类"跟着强调色走"的标记。 */
+    public int accentMark() {
+        return withAlpha(accent, 0xAA);
+    }
+
+    /** 弹层滚动区上下端的小黑条。 */
+    public int menuScrollHint() {
+        return withAlpha(0xFF000000, 0x66);
+    }
+
+    /** 面板是不是浅色 —— 衬底、徽标这些"压一层"的色要按它选黑还是白。 */
+    public boolean onLightPanel() {
+        return luminance(panelTop) > 0.55f;
     }
 
     /** 行间分隔线 / 面板内分割线：比发丝线重一档，保证在纯色面板上也看得见。 */
@@ -120,16 +155,20 @@ public record ZtTheme(Id id,
     }
 
     public int hudText() {
-        return accentLight();
+        return mix(accent, 0xFFFFFFFF, 0.45f);
     }
 
-    /** 弹条（toast）的三件套。 */
+    /** 弹条（toast）的四件套：底、描边、正文，外加左侧那条强调色。 */
     public int toastBg() {
-        return withAlpha(mix(panelBottom, 0xFF000000, 0.35f), 0xF0);
+        return withAlpha(mix(panelBottom, 0xFFFFFFFF, 0.055f), 0xF0);
     }
 
     public int toastBorder() {
         return withAlpha(accent, 0xAA);
+    }
+
+    public int toastEdge() {
+        return mix(panelTop, 0xFFFFFFFF, 0.28f);
     }
 
     public int toastText() {
@@ -138,11 +177,11 @@ public record ZtTheme(Id id,
 
     /** 失效槽位（枪不支持该槽位）的边框与文字：比不可安装更沉，一眼是"这里没有"。 */
     public int brokenBorder() {
-        return mix(blocked, panelBottom, 0.45f);
+        return mix(blocked, panelBottom, 0.63f);
     }
 
     public int brokenText() {
-        return mix(blocked, panelBottom, 0.25f);
+        return mix(blocked, panelBottom, 0.38f);
     }
 
     // ------------------------------------------------------------------ 颜色小工具
