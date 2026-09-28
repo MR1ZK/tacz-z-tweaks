@@ -162,14 +162,17 @@ public record ZtTheme(Id id,
         return onLightPanel() ? darken(blocked, 0.15f) : blocked;
     }
 
-    /** 上下暗角（3D 预览区压暗用）。 */
+    /**
+     * 上下暗角（3D 预览区压暗用）：由面板底压暗而来 —— 四套主题原先共用同一个常量，
+     * 与 ADR-0007 第 7 条"暗角也要进主题"不符。它压的是 3D 画面不是 UI，所以永远偏暗。
+     */
     public int vignette() {
-        return 0x99000000;
+        return withAlpha(darken(panelBottom, 0.72f), 0x99);
     }
 
-    /** 诊断 HUD 的底衬与文字。 */
+    /** 诊断 HUD 的底衬：同上，压暗面板底。 */
     public int hudBg() {
-        return 0x90000000;
+        return withAlpha(darken(panelBottom, 0.55f), 0x90);
     }
 
     public int hudText() {

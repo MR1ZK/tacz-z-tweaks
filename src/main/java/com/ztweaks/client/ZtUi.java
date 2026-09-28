@@ -110,7 +110,8 @@ public final class ZtUi {
      * 配置屏改动后各调一次。
      *
      * <p>自定义强调色只对默认主题生效（其余主题的强调色是它调性的组成部分，见 ADR-0007 第 5 条）；
-     * 存储结构是"每主题一份"的通用形态，将来放开只需改这一行判断。</p>
+     * v1 配置里只有**一个**全局的 {@code accent_rgb}，并不是"每主题一份" —— 将来真要那样，
+     * 在这里按主题 id 取色即可（那时的注释与 ADR 一起改）。</p>
      */
     public static void refresh() {
         ZtTheme.Id id = ZtConfig.THEME.get();
