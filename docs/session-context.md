@@ -1,6 +1,6 @@
 # 会话上下文摘要
 
-> 2026-09-25，截至「地图归档后全面开工」这轮更新：**不可安装的配件分组（#6）、参数卡补六项（#8）、详情条第三列变化项（#7）、悬停驱动整条详情条（#9）、预设系统（#10）** 全部落进代码，并已发布 **v0.1.3**。之后按用户实机试玩反馈修了三处（变化列标签顺序、参数卡分隔符、预设整体挪到左上角 + 命名回车/保存按钮），再发布 **v0.1.3-hotfix1**（与 TACZ Addon「随意配件」的对接修复 + 随意配件下的列表呈现与行间分隔线）。面向下一个接手的人（人或 agent）：读完这份文档应该能接着干活，不用翻对话记录。
+> 2026-10-10 更新，覆盖到 **v0.3.3-hotfix1**（Latest）。0.1.3 之后又走完四轮：① 与 TACZ Addon「随意配件」的对接修复；② **界面主题**（四套：默认（TACZ 青）/ MD3 质感 / 千禧航空 / Win 经典，默认主题可调强调色，见 ADR-0007 与 `CONTEXT.md` 的「主题」「强调色」）；③ **全盘 review（标准 / 规格双轴）及其修复**（按钮三态色与暗角 / HUD 底衬进主题、术语改名、详情条几何合一等）；④ 三条基线味道重构（详情条列几何、`SlotBar` 具名记录、排序键包成 `SortKey`；4/5 与 5/5 经确认不做）。其间还按实机反馈重排了底栏与信息框（名字移到方块下方、底栏不压信息框、浅色主题文字改走黑墨、不可用槽位改红）。面向下一个接手的人（人或 agent）：读完这份文档应该能接着干活，不用翻对话记录。
 
 ## 项目一句话
 
@@ -81,6 +81,10 @@
 - 验证方式：`./gradlew runClient` 起开发客户端自己试；启动日志可以 `grep "at com.ztweaks"` 看有没有我们自己抛的异常（整局 0 条才算干净）。**dev 环境装不了第三方 addon**：TACZ Addon 与 GunsmithLib 的 mixin 都 shadow 了 Minecraft 类成员（`taczaddon` 的 `AbstractContainerScreen.f_97732_`、`gunsmithlib` 的 `Entity.m_9236_`），ForgeGradle dev 下 refmap 对不上，而 mixin 默认要求注入成功 → 直接 FATAL、客户端起不来（**不是我们崩，也不是那两个模组坏**）。所以和 addon 的交互只能在**正式实例**（真 launcher + jar）里验；这两个 jar 现在被挪到 `run/client/mods-disabled/`。**想让 agent 也能"看画面"**：临时在 `ZtRefitScreen.render()` 末尾挂一个截图钩子 —— `Screenshot.grab(getMinecraft().gameDirectory, name, getMinecraft().getMainRenderTarget(), message -> {})`（1.20.1 的签名，已实测能编译），用环境变量 gate 住、每 2 秒一张、名字带上 `RefitTransform.getCurrentTransformType()`，图落在 `run/client/screenshots/`，agent 侧用 `read_file` 直接看图。**这段是验证脚手架，别提交**。
 
 ## 本会话踩过的坑（别再踩）
+
+- **shell 命令里塞多行文本会被剥离**（2026-09-28 连踩两次）：用 here-string 往脚本里拼 Java 代码片段时，命令中的换行会被剥掉 —— 轻则变量变空串（替换"命中但什么都没插"），重则插进去几行空白，症状是编译器在**所有**提到那个类型的地方报"找不到符号"。**写代码一律用文件编辑工具；脚本只做单行替换。**
+- **批量替换的锚点必须"上下文唯一"**：用 `List<Integer> rows = new ArrayList<>();` 这种裸行当锚点，会把另外两处同形的代码一起改坏（本次改坏了预设与主题弹层的行表）。要么把方法签名一起带上做锚点，要么先确认该串在文件里只出现一次。
+- **推送不要吞输出**：`git push 2>&1 | Select-Object -Last 1` 会把失败信息截掉，还可能打印成 "Everything up-to-date"，让人误以为推成功（实际是网络不通、`$LASTEXITCODE=128`）。**原样打印 push 的输出与退出码。**
 
 - **PowerShell 不支持 heredoc**，`git commit -F - <<'EOF'` 会炸；多行消息拆成多个 `-m` 或写临时文件
 - **PowerShell 会把多行字符串参数拆开**，含换行的 `-m "..."` 会变成多个 pathspec。**同样适用于 gh**：`gh issue comment N --body "多行"` 报 `accepts 1 arg(s), received 26`，`gh release create --notes "多行"` 同理 —— 一律写文件走 `--body-file` / `--notes-file`
