@@ -8,8 +8,8 @@
   "surface": "glass",
   "corner": 2,
   "palette": {
-    "panel_top": "#2E86C1E6",
-    "panel_bottom": "#0F3A57E6",
+    "panel_top": "#2E86C1D8",
+    "panel_bottom": "#0F3A57D8",
     "border": "#DFF6FF99",
     "accent": "#7FE3B0FF",
     "text": "#F2FBFFFF",
@@ -20,7 +20,7 @@
     "blocked": "#C98A8AFF",
     "hover_overlay": "#EAF9FF22",
     "control_bg": "#FFFFFF33",
-    "menu_bg": "#1D5A7ED9",
+    "menu_bg": "#1D5A7ED0",
     "menu_border": "#E8FAFF99",
     "menu_hover": "#FFFFFF33"
   },

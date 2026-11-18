@@ -92,8 +92,9 @@ public class ZtRefitScreen extends GunRefitScreen {
      * 连面板一起顶进了上面的详情条）。
      */
     private static final int SLOT_PAD_TOP = 2;
-    private static final int SLOT_LABEL_H = 10;
-    private static final int SLOT_PAD_BOTTOM = 2;
+    private static final int SLOT_LABEL_H = 11;
+    /** 名字下方多留一点：否则面板下边框会贴到字脚，低分辨率下像被裁掉 */
+    private static final int SLOT_PAD_BOTTOM = 4;
     /** 候选面板宽度与内部两栏高度：绘制与命中检测共用 {@link #listRect()}，不再各写一份。 */
     private static final int LIST_W = 190;
     private static final int LIST_HEADER = 15;
@@ -1712,9 +1713,7 @@ public class ZtRefitScreen extends GunRefitScreen {
         Rect rect = presetRect();
         boolean hovered = !dragging && rect.contains(mouseX, mouseY);
         boolean active = hovered || presetMenuOpen;
-        roundedFill(graphics, rect.x(), rect.y(), rect.w(), rect.h(), active ? BADGE_BG_ACTIVE : BADGE_BG);
-        innerBevel(graphics, rect, active);
-        roundedBorder(graphics, rect.x(), rect.y(), rect.w(), rect.h(), active ? WHITE_OVERLAY : HAIRLINE);
+        neutralButtonFace(graphics, rect, active, true);
         graphics.drawCenteredString(this.font, I18n.get("gui.z_tweaks.refit.preset.button"),
                 rect.x() + rect.w() / 2, rect.y() + 2, active ? TEXT : TEXT_DIM);
         if (hovered) {
@@ -1744,9 +1743,7 @@ public class ZtRefitScreen extends GunRefitScreen {
         Rect rect = themeRect();
         boolean hovered = !dragging && rect.contains(mouseX, mouseY);
         boolean active = hovered || themeMenuOpen;
-        roundedFill(graphics, rect.x(), rect.y(), rect.w(), rect.h(), active ? BADGE_BG_ACTIVE : BADGE_BG);
-        innerBevel(graphics, rect, active);
-        roundedBorder(graphics, rect.x(), rect.y(), rect.w(), rect.h(), active ? WHITE_OVERLAY : HAIRLINE);
+        neutralButtonFace(graphics, rect, active, true);
         roundedFill(graphics, rect.x() + 4, rect.y() + 4, 6, 6, ACCENT);
         graphics.drawString(this.font, truncate(ZtUi.theme().shortName().getString(), rect.w() - 16),
                 rect.x() + 13, rect.y() + 3, active ? TEXT : TEXT_DIM, false);
@@ -2359,8 +2356,9 @@ public class ZtRefitScreen extends GunRefitScreen {
         }
         int w = this.font.width(popup) + 18;
         int h = 14;
-        int x = (this.width - w) / 2;
-        int y = detailY() - h - 8;
+        // 右上角：原先贴在详情条上方会压住枪身，顶部居中又会和主题弹层抢位置
+        int x = this.width - w - 8;
+        int y = 4;
         // 投影跟着弹条一起淡出（直接复用 alpha，避免最后一帧"影子先没"）
         roundedFill(graphics, x + 2, y + 3, w, h, (alpha * 0x30 / 255) << 24);
         roundedFill(graphics, x, y, w, h, ZtTheme.withAlpha(TOAST_BG, alpha));

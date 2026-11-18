@@ -454,18 +454,12 @@ public final class ZtUi {
             borderColor = current.buttonBorder(semantic, hovered);
             textColor = hovered ? current.buttonText() : TEXT;
         }
-        ThemeChrome.Button buttonSpec = activeChrome.button();
-        ThemeChrome.NineSlice face = !enabled ? buttonSpec.disabled()
-                : (hovered ? buttonSpec.hover() : buttonSpec.normal());
-        if (face != null) {
-            graphics.blitNineSliced(face.texture(), rect.x(), rect.y(), rect.w(), rect.h(),
-                    face.left(), face.top(), face.right(), face.bottom(),
-                    face.width(), face.height(), face.u(), face.v());
+        if (buttonSlice(graphics, rect, hovered, enabled)) {
             graphics.drawCenteredString(font, label, rect.x() + rect.w() / 2, rect.y() + 4, textColor);
             return;
         }
 
-        ThemeChrome.ButtonStyle style = buttonSpec.style();
+        ThemeChrome.ButtonStyle style = activeChrome.button().style();
         if (style == ThemeChrome.ButtonStyle.FLAT) {
             int fill = enabled && hovered ? ZtTheme.mix(top, 0xFFFFFFFF, 0.10f) : top;
             roundedFill(graphics, rect.x(), rect.y(), rect.w(), rect.h(), fill);
@@ -484,5 +478,34 @@ public final class ZtUi {
         }
         roundedBorder(graphics, rect.x(), rect.y(), rect.w(), rect.h(), borderColor);
         graphics.drawCenteredString(font, label, rect.x() + rect.w() / 2, rect.y() + 4, textColor);
+    }
+
+    /** 按钮面贴图：三态有图就画并返回 true；没有图交给调用方的程序化路径。 */
+    private static boolean buttonSlice(GuiGraphics graphics, Rect rect, boolean hovered, boolean enabled) {
+        ThemeChrome.Button button = activeChrome.button();
+        ThemeChrome.NineSlice face = !enabled ? button.disabled()
+                : (hovered ? button.hover() : button.normal());
+        if (face == null) {
+            return false;
+        }
+        graphics.blitNineSliced(face.texture(), rect.x(), rect.y(), rect.w(), rect.h(),
+                face.left(), face.top(), face.right(), face.bottom(),
+                face.width(), face.height(), face.u(), face.v());
+        return true;
+    }
+
+    /**
+     * 中性按钮面（预设 / 主题）：有贴图就套主题的按钮面，没有就沿用原来的徽标底。
+     * 只画面、不画字 —— 这两个按钮的内容是自定义的（色块 + 缩写 / 居中文本）。
+     */
+    public static void neutralButtonFace(GuiGraphics graphics, Rect rect, boolean hovered, boolean enabled) {
+        if (buttonSlice(graphics, rect, hovered, enabled)) {
+            return;
+        }
+        roundedFill(graphics, rect.x(), rect.y(), rect.w(), rect.h(),
+                enabled && hovered ? BADGE_BG_ACTIVE : BADGE_BG);
+        innerBevel(graphics, rect, enabled && hovered);
+        roundedBorder(graphics, rect.x(), rect.y(), rect.w(), rect.h(),
+                enabled && hovered ? WHITE_OVERLAY : HAIRLINE);
     }
 }
