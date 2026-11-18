@@ -32,12 +32,47 @@
     "slot_gap": 6
   },
   "chrome": {
-    "frame": { "panel": "default", "popup": "default" },
-    "title_bar": { "style": "accent" },
+    "frame": {
+      "panel": {
+        "style": "default",
+        "texture": "z_tweaks:textures/gui/theme/md3.png",
+        "u": 0, "v": 0, "width": 64, "height": 64,
+        "left": 8, "top": 8, "right": 8, "bottom": 8
+      },
+      "popup": {
+        "style": "default",
+        "texture": "z_tweaks:textures/gui/theme/md3.png",
+        "u": 64, "v": 0, "width": 64, "height": 64,
+        "left": 8, "top": 8, "right": 8, "bottom": 8
+      }
+    },
+    "title_bar": {
+      "style": "accent",
+      "texture": "z_tweaks:textures/gui/theme/md3.png",
+      "u": 0, "v": 128, "width": 128, "height": 16,
+      "left": 4, "top": 2, "right": 4, "bottom": 2
+    },
     "corners": { "style": "none" },
     "pattern": { "style": "none", "alpha": 0.08 },
     "selection": { "style": "fill" },
-    "button": { "style": "flat" }
+    "button": {
+      "style": "flat",
+      "normal": {
+        "texture": "z_tweaks:textures/gui/theme/md3.png",
+        "u": 0, "v": 64, "width": 64, "height": 32,
+        "left": 6, "top": 5, "right": 6, "bottom": 5
+      },
+      "hover": {
+        "texture": "z_tweaks:textures/gui/theme/md3.png",
+        "u": 64, "v": 64, "width": 64, "height": 32,
+        "left": 6, "top": 5, "right": 6, "bottom": 5
+      },
+      "disabled": {
+        "texture": "z_tweaks:textures/gui/theme/md3.png",
+        "u": 0, "v": 96, "width": 64, "height": 32,
+        "left": 6, "top": 5, "right": 6, "bottom": 5
+      }
+    }
   },
   "effects": {
     "ambient": { "type": "spark", "density": 0.35, "speed": 0.8, "alpha": 0.22 }
