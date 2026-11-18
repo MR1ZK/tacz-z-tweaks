@@ -291,9 +291,8 @@ public final class ZtUi {
         if (SURFACE == ZtTheme.Surface.SOLID || PANEL_TOP == PANEL_BOTTOM) {
             roundedFill(graphics, x, y, w, h, PANEL_TOP);
         } else {
-            graphics.fillGradient(x + 1, y, x + w - 1, y + h, PANEL_TOP, PANEL_BOTTOM);
-            graphics.fill(x, y + 1, x + 1, y + h - 1, PANEL_TOP);
-            graphics.fill(x + w - 1, y + 1, x + w, y + h - 1, PANEL_BOTTOM);
+            // 渐变面板也按主题圆角切角：九宫格外框的圆角要能对得上，不然角上会露出方形底色
+            roundedFillGradient(graphics, x, y, w, h, PANEL_TOP, PANEL_BOTTOM);
         }
         int r = Math.max(0, Math.min(CORNER, Math.min(w, h) / 2));
         if (SURFACE == ZtTheme.Surface.GLASS) {
