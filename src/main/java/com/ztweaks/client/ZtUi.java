@@ -311,7 +311,8 @@ public final class ZtUi {
             graphics.fill(x + w - 2, y + inset, x + w - 1, y + h - inset, PANEL_SHADE);
         }
         pattern(graphics, x, y, w, h);
-        frame(graphics, x, y, w, h, activeChrome.frame().panel(), HAIRLINE, PANEL_HIGHLIGHT, PANEL_SHADE);
+        frame(graphics, x, y, w, h, activeChrome.frame().panel(), activeChrome.frame().panelSlice(),
+                HAIRLINE, PANEL_HIGHLIGHT, PANEL_SHADE);
         corners(graphics, x, y, w, h);
     }
 
@@ -342,9 +343,16 @@ public final class ZtUi {
         graphics.disableScissor();
     }
 
-    /** 外框样式：发丝线 / 立体边 / 双线 / 无。 */
+    /** 外框：有贴图九宫格就用贴图，否则按样式程序化绘制。 */
     private static void frame(GuiGraphics graphics, int x, int y, int w, int h,
-                              ThemeChrome.FrameStyle style, int border, int highlight, int shade) {
+                              ThemeChrome.FrameStyle style, ThemeChrome.NineSlice slice,
+                              int border, int highlight, int shade) {
+        if (slice != null) {
+            graphics.blitNineSliced(slice.texture(), x, y, w, h,
+                    slice.left(), slice.top(), slice.right(), slice.bottom(),
+                    slice.width(), slice.height(), slice.u(), slice.v());
+            return;
+        }
         switch (style) {
             case NONE -> {
             }
@@ -412,7 +420,8 @@ public final class ZtUi {
             graphics.fill(x + 1, y + inset, x + 2, y + h - inset, MENU_HIGHLIGHT);
             graphics.fill(x + w - 2, y + inset, x + w - 1, y + h - inset, MENU_SHADE);
         }
-        frame(graphics, x, y, w, h, activeChrome.frame().popup(), MENU_BORDER, MENU_HIGHLIGHT, MENU_SHADE);
+        frame(graphics, x, y, w, h, activeChrome.frame().popup(), activeChrome.frame().popupSlice(),
+                MENU_BORDER, MENU_HIGHLIGHT, MENU_SHADE);
     }
 
     /** 在内侧上沿压一条 1px 高光：让"预设 / 主题 / 排序"这类平面小按钮也有一点点凸起感。 */

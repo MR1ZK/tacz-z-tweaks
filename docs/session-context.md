@@ -2,7 +2,7 @@
 
 > 2026-10-10 更新，覆盖到 **v0.3.3-hotfix1**（Latest）。0.1.3 之后又走完四轮：① 与 TACZ Addon「随意配件」的对接修复；② **界面主题**（四套：默认（TACZ 青）/ MD3 质感 / 千禧航空 / Win 经典，默认主题可调强调色，见 ADR-0007 与 `CONTEXT.md` 的「主题」「强调色」）；③ **全盘 review（标准 / 规格双轴）及其修复**（按钮三态色与暗角 / HUD 底衬进主题、术语改名、详情条几何合一等）；④ 三条基线味道重构（详情条列几何、`SlotBar` 具名记录、排序键包成 `SortKey`；4/5 与 5/5 经确认不做）。其间还按实机反馈重排了底栏与信息框（名字移到方块下方、底栏不压信息框、浅色主题文字改走黑墨、不可用槽位改红）。面向下一个接手的人（人或 agent）：读完这份文档应该能接着干活，不用翻对话记录。（**2026-10-18 补**：剩下的功能待办已统一标记为「暂时不做」，见「已知问题 / 待办」抬头。同日另做了一轮**主题材质打磨**：面板内侧高光 / 暗边与玻璃高光带、按钮受光面、弹层投影、候选行与当前槽位的强调色渐变、详情条与概览卡的分栏引导线 —— 只动绘制，不碰布局与命中，口径仍在 ADR-0007 的"颜色 + 质感"内。）
 
-> **2026-11-18：主题系统 v2 开工**（[ADR-0008](adr/0008-theme-system-v2.md) 取代 ADR-0007 的第 1、2、5 条）。阶段 0–4 已落地：主题改成 `assets/z_tweaks/themes/*.json`、`ThemeRegistry` 懒加载（资源包可覆盖/新增）、配置 `theme` 从枚举名改为字符串 id 并自动映射旧值；`RefitLayout` 快照接管全部静态几何，五个受控参数已消费；`ThemeChrome` 装饰层已进 JSON 并生效，配置屏也换上了主题底与外框；氛围动效（`spark` / `flow` / `bokeh`）进 JSON，配置 `motion` 分 `FULL` / `REDUCED` / `OFF`，低于 45 FPS 持续 3 秒自动关粒子。**默认主题与 Win 经典不动效，MD3 与千禧航空开始有粒子层**。切主题的 180ms 过渡也已落地（调色板逐色插值、0.5 处换 chrome/effect、正弦压暗遮硬切；命中从第一帧就用最终几何）。下一阶段是纹理 atlas 与旗舰主题重做。
+> **2026-11-18：主题系统 v2 开工**（[ADR-0008](adr/0008-theme-system-v2.md) 取代 ADR-0007 的第 1、2、5 条）。阶段 0–4 已落地：主题改成 `assets/z_tweaks/themes/*.json`、`ThemeRegistry` 懒加载（资源包可覆盖/新增）、配置 `theme` 从枚举名改为字符串 id 并自动映射旧值；`RefitLayout` 快照接管全部静态几何，五个受控参数已消费；`ThemeChrome` 装饰层已进 JSON 并生效，配置屏也换上了主题底与外框；氛围动效（`spark` / `flow` / `bokeh`）进 JSON，配置 `motion` 分 `FULL` / `REDUCED` / `OFF`，低于 45 FPS 持续 3 秒自动关粒子。**默认主题与 Win 经典不动效，MD3 与千禧航空开始有粒子层**。切主题的 180ms 过渡也已落地（调色板逐色插值、0.5 处换 chrome/effect、正弦压暗遮硬切；命中从第一帧就用最终几何）。九宫格贴图的解析与绘制也已接上，**但还没有美术资源**：`frame.panel`/`frame.popup` 写 texture 对象即可启用，缺图自动回落程序化样式。下一步是旗舰主题重做（含 atlas 美术）。
 
 ## 项目一句话
 
@@ -30,7 +30,7 @@
   - `FirstPersonRenderGunEventMixin` —— 轨道相机，注入 `applyFirstPersonPositioningTransform` 的 RETURN
   - `GunItemRendererWrapperMixin` —— 悬停虚拟装配，`@ModifyVariable` 换入口的 gun stack
 - 核心文件：`ZtRefitScreen.java`（~2500 行，界面全部在这里）；`OrbitCamera` / `VirtualAssembly` 是状态单例；`StatCatalog` 是"可排序参数"的目录与取值口；预设的落盘与分享码在 `com.ztweaks.preset.PresetStore`（界面里只留交互与干跑）
-- **主题数据层（ADR-0008，进行中）**：内置主题在 `assets/z_tweaks/themes/*.json`，`ThemeRegistry` 懒加载、资源包可覆盖/新增；配置 `theme` 存字符串 id（旧枚举名 `DEFAULT`/`MD3`/`AERO`/`WIN_CLASSIC` 自动映射）。布局来自 `RefitLayout` 快照，装饰来自 `ThemeChrome`（六个部件，程序化样式，贴图 atlas 尚未接），动效来自 `ThemeEffect` + `AmbientEffects`（背景/前景两层、固定粒子池、45 FPS 自动降级）；切主题过渡在 `ZtRefitScreen` 内（`ZtTheme.lerp` + 压暗遮罩）
+- **主题数据层（ADR-0008，进行中）**：内置主题在 `assets/z_tweaks/themes/*.json`，`ThemeRegistry` 懒加载、资源包可覆盖/新增；配置 `theme` 存字符串 id（旧枚举名 `DEFAULT`/`MD3`/`AERO`/`WIN_CLASSIC` 自动映射）。布局来自 `RefitLayout` 快照，装饰来自 `ThemeChrome`（六个部件；外框支持九宫格贴图，缺图回落程序化样式），动效来自 `ThemeEffect` + `AmbientEffects`（背景/前景两层、固定粒子池、45 FPS 自动降级）；切主题过渡在 `ZtRefitScreen` 内（`ZtTheme.lerp` + 压暗遮罩）
 - 几何原则：**绘制与命中检测共用同一个 rect 来源**（`listRect` / `rowRect` / `slotRect` / `attachColumnRect`），改一处不会飘
 - 文案原则：枪的参数全部复用 TACZ 自己的 lang key（`tooltip.tacz.gun.*`）和 `AttachmentDataUtils` 离线计算，中英与原生 tooltip 对齐
 - 性能注意：`AttachmentDataUtils` 每次调用都全量重算，**必须缓存**（枪械参数卡按枪 id+NBT 缓存）

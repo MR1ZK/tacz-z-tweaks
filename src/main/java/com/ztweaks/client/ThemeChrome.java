@@ -1,5 +1,7 @@
 package com.ztweaks.client;
 
+import net.minecraft.resources.ResourceLocation;
+
 /**
  * 主题的装饰层（见 ADR-0008 第 4 条）：外框、标题条、角饰、底纹、选中态、按钮面。
  *
@@ -11,15 +13,23 @@ public record ThemeChrome(Frame frame, TitleBar titleBar, Corners corners,
 
     /** 整个装饰层的出厂值：与改造前完全一致（外框发丝线、标题强调色、无角饰/底纹、选中竖条、默认按钮）。 */
     public static final ThemeChrome DEFAULT = new ThemeChrome(
-            new Frame(FrameStyle.DEFAULT, FrameStyle.DEFAULT),
+            new Frame(FrameStyle.DEFAULT, FrameStyle.DEFAULT, null, null),
             new TitleBar(TitleStyle.ACCENT),
             new Corners(CornerStyle.NONE),
             new Pattern(PatternStyle.NONE, 0.08f),
             new Selection(SelectionStyle.BAR),
             new Button(ButtonStyle.DEFAULT));
 
-    /** 面板 / 弹层外框。 */
-    public record Frame(FrameStyle panel, FrameStyle popup) {
+    /** 面板 / 弹层外框：程序化样式打底，贴图九宫格可选覆盖。 */
+    public record Frame(FrameStyle panel, FrameStyle popup, NineSlice panelSlice, NineSlice popupSlice) {
+    }
+
+    /**
+     * 九宫格贴图：{@code texture} 是 atlas 路径，{@code u/v/width/height} 是源矩形，
+     * 四边 insets 是九宫格边距。贴图缺失时由注册表把整个对象置 null，回落到 {@link FrameStyle}。
+     */
+    public record NineSlice(ResourceLocation texture, int u, int v, int width, int height,
+                            int left, int top, int right, int bottom) {
     }
 
     public record TitleBar(TitleStyle style) {

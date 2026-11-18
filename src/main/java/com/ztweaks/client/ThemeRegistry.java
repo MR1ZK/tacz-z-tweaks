@@ -315,11 +315,13 @@ public final class ThemeRegistry {
             return ThemeChrome.DEFAULT;
         }
         JsonObject frame = obj(object, "frame");
+        JsonElement panelElement = frame.get("panel");
+        JsonElement popupElement = frame.get("popup");
         ThemeChrome.Frame frameSpec = new ThemeChrome.Frame(
-                enumValue(ThemeChrome.FrameStyle.class, str(frame, "panel", "default"),
-                        ThemeChrome.FrameStyle.DEFAULT),
-                enumValue(ThemeChrome.FrameStyle.class, str(frame, "popup", "default"),
-                        ThemeChrome.FrameStyle.DEFAULT));
+                frameStyle(panelElement),
+                frameStyle(popupElement),
+                frameSlice(panelElement),
+                frameSlice(popupElement));
 
         JsonObject title = obj(object, "title_bar");
         ThemeChrome.TitleBar titleBar = new ThemeChrome.TitleBar(
@@ -348,6 +350,55 @@ public final class ThemeRegistry {
                         ThemeChrome.ButtonStyle.DEFAULT));
 
         return new ThemeChrome(frameSpec, titleBar, cornersSpec, patternSpec, selectionSpec, buttonSpec);
+    }
+
+    /** 外框可以是 `"panel": "bevel"`，也可以是带贴图的对象；两种都解析成样式。 */
+    private static ThemeChrome.FrameStyle frameStyle(JsonElement element) {
+        if (element == null) {
+            return ThemeChrome.FrameStyle.DEFAULT;
+        }
+        if (element.isJsonObject()) {
+            return enumValue(ThemeChrome.FrameStyle.class,
+                    str(element.getAsJsonObject(), "style", "default"),
+                    ThemeChrome.FrameStyle.DEFAULT);
+        }
+        return enumValue(ThemeChrome.FrameStyle.class, element.getAsString(),
+                ThemeChrome.FrameStyle.DEFAULT);
+    }
+
+    /** 外框贴图：对象里有 texture 才解析；文件不存在时返回 null，回落到程序化样式。 */
+    private static ThemeChrome.NineSlice frameSlice(JsonElement element) {
+        if (element == null || !element.isJsonObject()) {
+            return null;
+        }
+        JsonObject object = element.getAsJsonObject();
+        String texture = str(object, "texture", null);
+        if (texture == null || texture.isBlank()) {
+            return null;
+        }
+        ResourceLocation location = ResourceLocation.tryParse(texture);
+        if (location == null || !textureExists(location)) {
+            LOGGER.warn("Theme frame texture '{}' is missing, falling back to programmatic style", texture);
+            return null;
+        }
+        int width = integer(object, "width", 0);
+        int height = integer(object, "height", 0);
+        if (width <= 0 || height <= 0) {
+            LOGGER.warn("Theme frame texture '{}' has no valid width/height", texture);
+            return null;
+        }
+        int left = Math.max(0, Math.min(width / 2, integer(object, "left", 4)));
+        int right = Math.max(0, Math.min(width / 2, integer(object, "right", 4)));
+        int top = Math.max(0, Math.min(height / 2, integer(object, "top", 4)));
+        int bottom = Math.max(0, Math.min(height / 2, integer(object, "bottom", 4)));
+        return new ThemeChrome.NineSlice(location, integer(object, "u", 0), integer(object, "v", 0),
+                width, height, left, top, right, bottom);
+    }
+
+    private static boolean textureExists(ResourceLocation location) {
+        Minecraft minecraft = Minecraft.getInstance();
+        return minecraft != null && minecraft.getResourceManager() != null
+                && minecraft.getResourceManager().getResource(location).isPresent();
     }
 
     private static <E extends Enum<E>> E enumValue(Class<E> type, String raw, E fallback) {
