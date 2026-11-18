@@ -79,21 +79,21 @@ import static com.ztweaks.client.ZtUi.*;
  */
 public class ZtRefitScreen extends GunRefitScreen {
 
+    // ---- 布局基准值：主题只能按 ThemeMetrics 的五个参数缩放它们，最终值见 RefitLayout.
+    /** 槽位方块的基准边长（density 缩放）。 */
     private static final int SLOT = 22;
+    /** 候选行高的基准值（density 缩放）。 */
     private static final int ROW_H = 19;
+    /** 详情条高度：不随 density 变，否则按钮与 3D 取景的平衡会被打破。 */
     private static final int DETAIL_H = 68;
-    private static final int PAD = 6;
     /**
-     * 槽位条（底栏）的内边距与总高。名字写在方块**下方**、整块塞进这块面板里 ——
+     * 槽位条（底栏）的内边距。名字写在方块**下方**、整块塞进这块面板里 ——
      * 上下边框各自留一点白，方块与文字都不许越界（用户实机反馈：原先名字画在方块上方，
      * 连面板一起顶进了上面的详情条）。
      */
     private static final int SLOT_PAD_TOP = 2;
     private static final int SLOT_LABEL_H = 10;
     private static final int SLOT_PAD_BOTTOM = 2;
-    private static final int SLOT_BAR_H = SLOT_PAD_TOP + SLOT + SLOT_LABEL_H + SLOT_PAD_BOTTOM;
-    /** 槽位条面板与详情条之间的固定间隙：谁都不许盖过谁。 */
-    private static final int SLOT_BAR_GAP = 6;
     /** 候选面板宽度与内部两栏高度：绘制与命中检测共用 {@link #listRect()}，不再各写一份。 */
     private static final int LIST_W = 190;
     private static final int LIST_HEADER = 15;
@@ -173,7 +173,7 @@ public class ZtRefitScreen extends GunRefitScreen {
     private static final int INFO_COLUMNS = 3;
     private static final int INFO_ROWS = 5;
     private static final int INFO_LINE_H = 11;
-    private static final float INFO_SCALE = 0.8f;
+    // INFO 卡的字号缩放来自主题（ThemeMetrics.infoFontScale，默认 0.8），见 RefitLayout.infoScale()。
     /** 第一列（名字 + 描述）要宽一些，折行最吃宽度。 */
     private static final float[] INFO_COLUMN_SHARE = {1.5f, 1.0f, 1.0f};
     /** 与 TACZ 的 ClientGunTooltip 同款格式器（带 % 后缀 = 自动乘 100，传小数比例进去）。 */
@@ -221,6 +221,28 @@ public class ZtRefitScreen extends GunRefitScreen {
      * 候选列表排序偏好：{@link #SORT_NAME} / {@link #SORT_MOD} / 某个参数。
      * 切槽位<b>不</b>清空 —— 排序是玩家的全局习惯，不是某个槽位的属性（与搜索词相反）。
      */
+    /** 布局快照（ADR-0008 第 3 条）：绘制、命中、滚轮都从这里取，主题/尺寸变化时重算。 */
+    private RefitLayout layout;
+
+    /** 激光调色滑块组：主题改 metrics 后整组重建，位置跟着新布局走。 */
+    private HSVSliderGroup laserSliders;
+
+    /** 氛围动效的粒子池（背景层 + 前景层）。 */
+    private final AmbientEffects ambientEffects = new AmbientEffects();
+    private long fpsWindowNanos;
+    private int fpsFrames;
+    private int lowFpsSeconds;
+    private boolean motionDegraded;
+
+    /** 切主题的 180ms 过渡（调色板插值 + 中点换 chrome/metrics + 压暗遮罩）。 */
+    private static final long THEME_TRANSITION_MS = 180L;
+    private ZtTheme transitionFrom;
+    private ZtTheme transitionTo;
+    private int transitionFromAccent;
+    private int transitionToAccent;
+    private long transitionStartNanos;
+    private boolean transitionChromeSwapped;
+
     private SortKey sortKey = SortKey.NAME;
     /** 方向：true = 优→劣。名称/模组这两项没有"优劣"可言，就是 A-Z / Z-A。 */
     private boolean sortBestFirst = true;
@@ -323,9 +345,22 @@ public class ZtRefitScreen extends GunRefitScreen {
     public void init() {
         // 原型：不调用 super.init()，全部自绘。
         this.clearWidgets();
-        // 主题是"活动调色板"（见 ADR-0007）：进界面前从配置重算一次，配置屏或按钮改了主题
-        // 之后都能立刻看到效果。放在这里而不是模组初始化 —— 配置项在构造期还不允许读。
+        this.laserSliders = null;
+        // 主题是"活动调色板"（见 ADR-0008）：进界面前重扫主题资源并重算一次，配置屏或按钮改了
+        // 主题、资源包换了主题文件，都能立刻看到效果。放在这里而不是模组初始化 —— 配置项在构造期
+        // 还不允许读，资源管理器也未必就绪。
+        ThemeRegistry.invalidate();
         ZtUi.refresh();
+        rebuildLayout();
+        // 每次进屏重置动效降级：上一轮的帧率不代表这一轮
+        this.fpsWindowNanos = 0L;
+        this.fpsFrames = 0;
+        this.lowFpsSeconds = 0;
+        this.motionDegraded = false;
+        // 重进/重排时取消未完成的主题过渡，避免下一帧拿旧 from 继续插值
+        this.transitionFrom = null;
+        this.transitionTo = null;
+        this.transitionChromeSwapped = false;
         this.invalidateCandidates();
         // 弹出层跟着关：init() 会被切槽位与服务端刷新（装/卸完成后）触发，
         // 此时底下的列表已经换了一批，留着旧菜单容易点到不存在的内容。
@@ -373,17 +408,14 @@ public class ZtRefitScreen extends GunRefitScreen {
         addRenderableWidget(box);
     }
 
-    /** 搜索框矩形：贴候选面板底部内侧，右边腾出 {@link #SORT_W} 给排序按钮，几何与 {@link #listRect()} 同源。 */
+    /** 搜索框矩形：来自布局快照（贴候选面板底部内侧，右边给排序按钮让位）。 */
     private Rect searchRect() {
-        Rect list = listRect();
-        int width = list.w() - 8 - SORT_W - SORT_GAP;
-        return new Rect(list.x() + 4, footerY(list), width, SEARCH_H);
+        return layout().search();
     }
 
-    /** 排序按钮矩形：与搜索框同一行，紧贴其右侧。 */
+    /** 排序按钮矩形：来自布局快照，与搜索框同一行。 */
     private Rect sortRect() {
-        Rect search = searchRect();
-        return new Rect(search.x() + search.w() + SORT_GAP, search.y(), SORT_W, SEARCH_H);
+        return layout().sortButton();
     }
 
     /** 候选面板底部这一行（搜索框 / 排序按钮）的顶边。 */
@@ -485,10 +517,11 @@ public class ZtRefitScreen extends GunRefitScreen {
     }
 
     /** 弹出层内容的总高度（十四行 + 两个分隔条 + 上下内边距），不受视口限制。 */
-    private static int sortMenuContentHeight() {
+    private int sortMenuContentHeight() {
+        RefitLayout snapshot = layout();
         int height = MENU_PAD * 2;
         for (SortKey key : SORT_MENU_ROWS) {
-            height += key.code() == MENU_SEP ? MENU_SEP_H : MENU_ROW_H;
+            height += key.code() == MENU_SEP ? snapshot.menuSepH() : snapshot.menuRowH();
         }
         return height;
     }
@@ -506,9 +539,10 @@ public class ZtRefitScreen extends GunRefitScreen {
      */
     private Rect sortMenuRect() {
         Rect list = listRect();
-        int top = Math.max(2, list.y() + LIST_HEADER);
+        RefitLayout snapshot = layout();
+        int top = Math.max(2, list.y() + snapshot.listHeader());
         int bottom = footerY(list) - 2;
-        int height = Math.max(MENU_ROW_H * 2 + MENU_PAD * 2,
+        int height = Math.max(snapshot.menuRowH() * 2 + MENU_PAD * 2,
                 Math.min(sortMenuContentHeight(), bottom - top));
         Rect sort = sortRect();
         int x = Math.min(sort.x() + sort.w() - MENU_W, this.width - MENU_W - 2);
@@ -529,7 +563,7 @@ public class ZtRefitScreen extends GunRefitScreen {
         int contentY = (int) (mouseY - menu.y()) + sortMenuScroll;
         int y = MENU_PAD;
         for (SortKey key : SORT_MENU_ROWS) {
-            int height = key.code() == MENU_SEP ? MENU_SEP_H : MENU_ROW_H;
+            int height = key.code() == MENU_SEP ? layout().menuSepH() : layout().menuRowH();
             if (contentY >= y && contentY < y + height) {
                 return key.code() == MENU_SEP ? SortKey.of(MENU_NONE) : key;
             }
@@ -600,9 +634,10 @@ public class ZtRefitScreen extends GunRefitScreen {
     }
 
     private void addLaserSliders(Inventory inventory, AttachmentType type) {
-        HSVSliderGroup group = new HSVSliderGroup(PAD, detailY() - 42, 120, 14, inventory, inventory.selected, type);
-        addRenderableWidget(group.getHueSlider());
-        addRenderableWidget(group.getSaturationSlider());
+        this.laserSliders = new HSVSliderGroup(layout().pad(), detailY() - 42, 120, 14,
+                inventory, inventory.selected, type);
+        addRenderableWidget(this.laserSliders.getHueSlider());
+        addRenderableWidget(this.laserSliders.getSaturationSlider());
     }
 
     // ---------------------------------------------------------------- 数据
@@ -1073,6 +1108,7 @@ public class ZtRefitScreen extends GunRefitScreen {
 
     @Override
     public void render(GuiGraphics graphics, int mouseX, int mouseY, float partialTick) {
+        updateThemeTransition();
         super.render(graphics, mouseX, mouseY, partialTick);
         rebuildCandidates();
         refreshPreview();
@@ -1088,6 +1124,10 @@ public class ZtRefitScreen extends GunRefitScreen {
         pendingTooltip = null;
         // 枪本体是 3D 世界里的渲染，压一层极淡的上下暗角把界面压出层次，同时不遮挡枪
         drawVignette(graphics);
+        // 氛围粒子：背景层在 3D 与面板之间，前景层画完详情条后再补（见下）
+        trackMotionBudget();
+        ambientEffects.update(activeEffect(), this.width, this.height, effectForegroundArea());
+        ambientEffects.renderBackground(graphics);
         drawSlotBar(graphics, mouseX, mouseY);
         // 概览态不画候选框：空面板 + "0" 徽标是纯噪音。隐藏后那块区域交还给 3D 预览的拖拽/滚轮。
         if (candidateListVisible()) {
@@ -1097,6 +1137,8 @@ public class ZtRefitScreen extends GunRefitScreen {
         }
         syncPreview();
         drawDetail(graphics, mouseX, mouseY);
+        // 前景粒子压在面板之上，但只裁在 3D 预览区；菜单/弹条随后绘制，仍在最上层
+        ambientEffects.renderForeground(graphics);
         if (showNativeBars && ZtConfig.DEBUG_NATIVE_BARS.get()) {
             GunPropertyDiagrams.draw(graphics, this.font, 11, 96);
         }
@@ -1120,6 +1162,8 @@ public class ZtRefitScreen extends GunRefitScreen {
             button(graphics, this.font, presetSaveRect(), I18n.get("gui.z_tweaks.refit.preset.save_button"),
                     !dragging && presetSaveRect().contains(mouseX, mouseY), true, true);
         }
+        // 过渡压暗画在所有界面元素之上、tooltip 之下：把 0.5 处的 chrome/metrics 硬切藏掉
+        drawTransitionDim(graphics);
         flushTooltip(graphics);
     }
 
@@ -1146,42 +1190,222 @@ public class ZtRefitScreen extends GunRefitScreen {
         }
     }
 
-    /** 槽位条面板的顶边。 */
-    private int slotBarTop() {
-        return this.height - SLOT_BAR_H - 6;
+    // ---------------------------------------------------------------- 布局快照
+
+    /**
+     * 重算布局。**唯一**消费布局常量与主题 metrics 的地方：槽位条 / 候选面板 / 详情条 /
+     * 按钮 / 列宽都从这里出，绘制与命中不再各算一套。
+     */
+    private void rebuildLayout() {
+        ThemeMetrics metrics = ZtUi.metrics();
+        int pad = metrics.panelPadding();
+        int rowH = Math.max(12, Math.round(ROW_H * metrics.density()));
+        int menuRowH = Math.max(9, Math.round(MENU_ROW_H * metrics.density()));
+        int menuSepH = Math.max(2, Math.round(MENU_SEP_H * metrics.density()));
+        int slot = Math.max(14, Math.round(SLOT * metrics.density()));
+        int slotLabelH = Math.max(SLOT_LABEL_H, Math.round(SLOT_LABEL_H * metrics.density()));
+        int slotBarH = SLOT_PAD_TOP + slot + slotLabelH + SLOT_PAD_BOTTOM;
+        int slotBarTop = this.height - slotBarH - 6;
+
+        List<AttachmentType> types = slotTypes();
+        int step = slotStep(types, slot, pad);
+        int slotBarX0 = (this.width - types.size() * step) / 2;
+
+        int detailH = DETAIL_H;
+        int detailY = slotBarTop - metrics.slotGap() - detailH;
+        int listH = Math.max(64, detailY - 8 - 26);
+        int listX = this.width - LIST_W - pad;
+
+        Rect preset = new Rect(pad, 4, 64, 14);
+        Rect theme = new Rect(preset.x() + preset.w() + 4, preset.y(), preset.w(), preset.h());
+        Rect presetName = new Rect(preset.x(), preset.y() + preset.h() + 2, 108, 12);
+        Rect presetSave = new Rect(presetName.x() + presetName.w() + 4, presetName.y(), 40, 12);
+
+        Rect slotBar = new Rect(slotBarX0 - 6, slotBarTop, types.size() * step + 12, slotBarH);
+        List<Rect> slots = new ArrayList<>(types.size());
+        for (int i = 0; i < types.size(); i++) {
+            int cell = slotBarX0 + i * step;
+            slots.add(new Rect(cell + (step - slot) / 2, slotBarTop + SLOT_PAD_TOP, slot, slot));
+        }
+
+        Rect list = new Rect(listX, 26, LIST_W, listH);
+        Rect search = new Rect(list.x() + 4, footerY(list),
+                list.w() - 8 - SORT_W - SORT_GAP, SEARCH_H);
+        Rect sort = new Rect(search.x() + search.w() + SORT_GAP, search.y(), SORT_W, SEARCH_H);
+
+        Rect detail = new Rect(pad, detailY, this.width - pad * 2, detailH);
+        Rect install = new Rect(pad + (this.width - pad * 2) - 136, detailY + detailH - 16, 64, 14);
+        Rect unload = new Rect(pad + (this.width - pad * 2) - 68, detailY + detailH - 16, 64, 14);
+
+        int leftWidth = (int) (detail.w() * metrics.detailLeftRatio());
+        int columnWidth = (detail.w() - leftWidth - DETAIL_RIGHT_RESERVE) / 3;
+        int[] columns = new int[3];
+        for (int i = 0; i < columns.length; i++) {
+            columns[i] = detail.x() + leftWidth + DETAIL_LEFT_GAP
+                    + i * (columnWidth + DETAIL_COLUMN_GAP);
+        }
+
+        this.layout = new RefitLayout(this.width, this.height, pad, metrics.slotGap(),
+                metrics.infoFontScale(), rowH, menuRowH, menuSepH,
+                LIST_HEADER, LIST_FOOTER, slot, step,
+                preset, theme, presetName, presetSave,
+                slotBar, List.copyOf(slots), list, search, sort,
+                detail, install, unload, leftWidth, columnWidth, columns);
     }
 
-    /** 槽位方块的顶边：面板内部，上面留 {@link #SLOT_PAD_TOP}。 */
-    private int slotBarY() {
-        return slotBarTop() + SLOT_PAD_TOP;
+    /** 布局未建时兜底；正常路径上 {@code init()} 会先重算。 */
+    private RefitLayout layout() {
+        if (layout == null) {
+            rebuildLayout();
+        }
+        return layout;
+    }
+
+    /** 主题在屏内切换后，把原生控件挪到新布局上（自绘部分已经读新快照）。 */
+    private void relayoutWidgets() {
+        if (this.searchBox != null) {
+            Rect search = searchRect();
+            this.searchBox.setX(search.x());
+            this.searchBox.setY(search.y());
+            this.searchBox.setWidth(search.w());
+        }
+        // 激光滑块组的内部排布在 TACZ 手里：整组丢掉、按新布局重建，别逐个 setX/setY 猜
+        if (this.laserSliders != null) {
+            removeWidget(this.laserSliders.getHueSlider());
+            removeWidget(this.laserSliders.getSaturationSlider());
+            this.laserSliders = null;
+            addLaserSliders();
+        }
+    }
+
+    /** 当前应该播放的氛围动效：配置档位与自动降级都在这道闸门里。 */
+    private ThemeEffect activeEffect() {
+        if (motionDegraded) {
+            return ThemeEffect.NONE;
+        }
+        ZtConfig.Motion mode = ZtConfig.MOTION.get();
+        return mode == ZtConfig.Motion.FULL ? ZtUi.effect() : ThemeEffect.NONE;
     }
 
     /**
-     * 详情条的底边永远在槽位条面板**上方** {@link #SLOT_BAR_GAP} 处 ——
+     * 帧率预算：连续 3 个 1 秒窗口低于 45 FPS 就把粒子关掉（只降不升，直到下次进屏）。
+     * 只统计、不做任何渲染决策之外的事，HUD 不读它。
+     */
+    private void trackMotionBudget() {
+        long now = System.nanoTime();
+        if (fpsWindowNanos == 0L) {
+            fpsWindowNanos = now;
+            return;
+        }
+        fpsFrames++;
+        long elapsed = now - fpsWindowNanos;
+        if (elapsed < 1_000_000_000L) {
+            return;
+        }
+        int fps = Math.round(fpsFrames * 1_000_000_000f / elapsed);
+        lowFpsSeconds = fps < 45 ? lowFpsSeconds + 1 : 0;
+        if (lowFpsSeconds >= 3 && !motionDegraded) {
+            motionDegraded = true;
+            ambientEffects.update(ThemeEffect.NONE, this.width, this.height, new Rect(0, 0, 0, 0));
+        }
+        fpsWindowNanos = now;
+        fpsFrames = 0;
+    }
+
+    /** 前景粒子只允许出现在 3D 预览区：候选框左侧、详情条上方。 */
+    private Rect effectForegroundArea() {
+        int right = candidateListVisible() ? listRect().x() - 4 : this.width;
+        int bottom = detailY() - 4;
+        return new Rect(0, 0, Math.max(0, right), Math.max(0, bottom));
+    }
+
+    /**
+     * 开始切主题：几何与 metrics 立刻换成目标（命中永远用最终几何），调色板在 180ms 里插值，
+     * chrome/effect 在中点切换，同时压一层正弦遮罩把切换藏起来。
+     */
+    private void beginThemeTransition(ZtTheme from, ThemeSpec target) {
+        ZtTheme to = target.theme();
+        if (from.id().equals(to.id())) {
+            return;
+        }
+        if (ZtConfig.MOTION.get() == ZtConfig.Motion.OFF) {
+            ZtUi.refresh();
+            rebuildLayout();
+            relayoutWidgets();
+            return;
+        }
+        transitionFrom = from;
+        transitionTo = to;
+        transitionFromAccent = ZtUi.ACCENT;
+        transitionToAccent = to.accentEditable() ? ZtConfig.THEME_ACCENT.get() : to.accent();
+        transitionStartNanos = System.nanoTime();
+        transitionChromeSwapped = false;
+        ZtUi.setMetrics(target.metrics());
+        rebuildLayout();
+        relayoutWidgets();
+    }
+
+    /** 每帧推进主题过渡；进度到 0.5 换 chrome/effect，到 1 落定并清状态。 */
+    private void updateThemeTransition() {
+        if (transitionFrom == null) {
+            return;
+        }
+        long elapsed = System.nanoTime() - transitionStartNanos;
+        float t = Math.min(1f, elapsed / (THEME_TRANSITION_MS * 1_000_000f));
+        float eased = t * t * (3f - 2f * t);
+
+        if (t >= 0.5f && !transitionChromeSwapped) {
+            ThemeSpec target = ThemeRegistry.resolve(transitionTo.id());
+            ZtUi.setChrome(target.chrome());
+            ZtUi.setEffect(target.effect());
+            transitionChromeSwapped = true;
+        }
+        if (t >= 1f) {
+            ZtUi.refresh();
+            rebuildLayout();
+            relayoutWidgets();
+            transitionFrom = null;
+            transitionTo = null;
+            return;
+        }
+        int accent = ZtTheme.lerpArgb(transitionFromAccent, transitionToAccent, eased);
+        ZtUi.apply(ZtTheme.lerp(transitionFrom, transitionTo, eased), accent & 0xFFFFFF);
+    }
+
+    /** 过渡期的正弦压暗：0 → 峰值 → 0，用来遮住 chrome/metrics 在 0.5 处的硬切。 */
+    private void drawTransitionDim(GuiGraphics graphics) {
+        if (transitionFrom == null) {
+            return;
+        }
+        long elapsed = System.nanoTime() - transitionStartNanos;
+        float t = Math.min(1f, elapsed / (THEME_TRANSITION_MS * 1_000_000f));
+        float dim = (float) Math.sin(Math.PI * t) * 0.22f;
+        if (dim <= 0f) {
+            return;
+        }
+        graphics.fill(0, 0, this.width, this.height, Math.round(dim * 255f) << 24);
+    }
+
+    /**
+     * 详情条的底边永远在槽位条面板**上方** {@code slotGap} 处 ——
      * 底栏的边框压到信息框上，是用户实机反馈里明确不许发生的一条。
      */
     private int detailY() {
-        return slotBarTop() - SLOT_BAR_GAP - DETAIL_H;
+        return layout().detail().y();
     }
 
     // ---------------------------------------------------------------- 详情条的列几何
-    // 下面这五个是**唯一**的列位来源：绘制、命中检测、滚轮分栏都从这里取。
-    // 原先 drawDetail / deltaColumnRect / attachColumnRect 各写过一遍同样的算式
-    // （0.40f、+6、-26、/3、+7），改一处忘一处就会"画在这、点在那"。
+    // 列位全部来自布局快照（见 RefitLayout）；这里只做转发，不再自己算。
     // 概览态的信息卡是另一套排版（按 share 三等分，见 INFO_COLUMN_SHARE），刻意不同。
 
     /** 详情条内容区的左边界与总宽。 */
     private int detailLeft() {
-        return PAD;
+        return layout().detail().x();
     }
 
-    private int detailWidth() {
-        return this.width - PAD * 2;
-    }
-
-    /** 左列（配件卡 / 名字 + 描述）宽度：占总宽 40%，折行最吃宽度所以给得多。 */
+    /** 左列（配件卡 / 名字 + 描述）宽度：由主题的 detail_left_ratio 决定。 */
     private int detailLeftWidth() {
-        return (int) (detailWidth() * 0.40f);
+        return layout().detailLeftWidth();
     }
 
     /** 左列与右半边之间的间隔。 */
@@ -1192,57 +1416,49 @@ public class ZtRefitScreen extends GunRefitScreen {
     private static final int DETAIL_RIGHT_RESERVE = DETAIL_LEFT_GAP + 2 * DETAIL_COLUMN_GAP + 6;
 
     private int detailColumnWidth() {
-        return (detailWidth() - detailLeftWidth() - DETAIL_RIGHT_RESERVE) / 3;
+        return layout().detailColumnWidth();
     }
 
     /** 右半边第 {@code index} 栏的左边（0 = Pros、1 = Cons、2 = 变化列）。 */
     private int detailColumnLeft(int index) {
-        return detailLeft() + detailLeftWidth() + DETAIL_LEFT_GAP
-                + index * (detailColumnWidth() + DETAIL_COLUMN_GAP);
+        int[] columns = layout().detailColumns();
+        return columns[Math.max(0, Math.min(columns.length - 1, index))];
     }
 
-    /** 槽位条的水平几何：起点与列间距。原先用 {@code int[]} 返回，"下标 0 是哪个"全靠记。 */
-    private record SlotBar(int x0, int step) {
-    }
-
-    /** 槽位条的水平起点与列间距：绘制与命中检测共用，杜绝两处各写一份几何。 */
-    private SlotBar slotBarGeometry(List<AttachmentType> types) {
-        int step = slotStep(types);
-        return new SlotBar((this.width - types.size() * step) / 2, step);
-    }
-
-    /** 第 index 个槽位的方块矩形（列内居中，列宽大于方块时两侧留白对称）。 */
-    private Rect slotRect(List<AttachmentType> types, int index) {
-        SlotBar bar = slotBarGeometry(types);
-        int cell = bar.x0() + index * bar.step();
-        return new Rect(cell + (bar.step() - SLOT) / 2, slotBarY(), SLOT, SLOT);
+    /** 第 index 个槽位的方块矩形：直接取布局快照（列内居中由布局负责）。 */
+    private Rect slotRect(int index) {
+        List<Rect> slots = layout().slots();
+        return slots.get(Math.max(0, Math.min(slots.size() - 1, index)));
     }
 
     private void drawSlotBar(GuiGraphics graphics, int mouseX, int mouseY) {
         List<AttachmentType> types = slotTypes();
-        SlotBar bar = slotBarGeometry(types);
-        int step = bar.step();
-        int x0 = bar.x0();
-        int barWidth = types.size() * step;
-        int y = slotBarY();
+        Rect bar = layout().slotBar();
+        int step = layout().slotStep();
         AttachmentType current = RefitTransform.getCurrentTransformType();
         ItemStack gun = gunStack();
         IGun iGun = IGun.getIGunOrNull(gun);
 
         // 整条槽位条坐在一块圆角渐变面板上：3D 画面上直接摆一排方块会"飘"，加个托底就有层次。
-        // 面板从方块的顶边再往上留 SLOT_PAD_TOP，往下留到名字下面 —— 方块与文字都在里面。
-        panel(graphics, x0 - 6, y - SLOT_PAD_TOP, barWidth + 12, SLOT_BAR_H);
+        // 面板矩形来自布局快照，方块与文字都在里面。
+        panel(graphics, bar.x(), bar.y(), bar.w(), bar.h());
 
         for (int i = 0; i < types.size(); i++) {
             AttachmentType type = types.get(i);
-            Rect rect = slotRect(types, i);
+            Rect rect = slotRect(i);
             boolean hovered = rect.contains(mouseX, mouseY) && !dragging;
             boolean isCurrent = type == current;
             boolean allowed = iGun != null && iGun.allowAttachmentType(gun, type);
 
             if (allowed) {
-                int fill = isCurrent ? ACCENT_SOFT : (hovered ? HOVER_OVERLAY : SLOT_BG);
-                roundedFill(graphics, rect.x(), rect.y(), rect.w(), rect.h(), fill);
+                if (isCurrent) {
+                    // 当前槽位：上浓下淡的强调色渐变，比一整块平铺更像"被点亮"
+                    roundedFillGradient(graphics, rect.x(), rect.y(), rect.w(), rect.h(),
+                            ACCENT_SOFT, ZtTheme.withAlpha(ACCENT, 0x16));
+                } else {
+                    roundedFill(graphics, rect.x(), rect.y(), rect.w(), rect.h(),
+                            hovered ? HOVER_OVERLAY : SLOT_BG);
+                }
                 roundedBorder(graphics, rect.x(), rect.y(), rect.w(), rect.h(),
                         isCurrent ? ACCENT : (hovered ? WHITE_OVERLAY : BORDER_STRONG));
             } else {
@@ -1262,12 +1478,12 @@ public class ZtRefitScreen extends GunRefitScreen {
             // 名字写在方块**下方**（紧贴方块），整块仍在底栏面板里：上下都不越界
             String label = truncate(slotName(type), step - 2);
             int labelColor = !allowed ? BLOCKED : (isCurrent ? ACCENT : (hovered ? TEXT : TEXT_DIM));
-            graphics.drawCenteredString(this.font, label, rect.x() + rect.w() / 2, rect.y() + SLOT + 1, labelColor);
+            graphics.drawCenteredString(this.font, label, rect.x() + rect.w() / 2, rect.y() + rect.h() + 1, labelColor);
             // 当前槽位在方块下沿压一条强调线，比整块高亮更克制、也更不抢枪的视觉
             if (isCurrent) {
                 int w = this.font.width(label);
                 int cx = rect.x() + rect.w() / 2;
-                graphics.fill(cx - w / 2, rect.y() + SLOT - 1, cx + w / 2, rect.y() + SLOT, ACCENT);
+                graphics.fill(cx - w / 2, rect.y() + rect.h() - 1, cx + w / 2, rect.y() + rect.h(), ACCENT);
             }
 
             if (hovered) {
@@ -1291,13 +1507,14 @@ public class ZtRefitScreen extends GunRefitScreen {
 
     /** 候选面板矩形：绘制、点击命中、滚轮判定三者共用同一来源。 */
     private Rect listRect() {
-        int height = Math.max(64, detailY() - 8 - 26);
-        return new Rect(this.width - LIST_W - PAD, 26, LIST_W, height);
+        return layout().list();
     }
 
     /** 候选面板第 i 行的矩形（i 从 0 开始，不含滚动偏移）。两行之间留 2px 缝，观感更透气。 */
-    private static Rect rowRect(Rect list, int i) {
-        return new Rect(list.x() + 3, list.y() + LIST_HEADER + i * ROW_H, list.w() - 6, ROW_H - 2);
+    private Rect rowRect(Rect list, int i) {
+        RefitLayout snapshot = layout();
+        return new Rect(list.x() + 3, list.y() + snapshot.listHeader() + i * snapshot.rowH(),
+                list.w() - 6, snapshot.rowH() - 2);
     }
 
     private void drawCandidateList(GuiGraphics graphics, int mouseX, int mouseY, float partialTick) {
@@ -1310,7 +1527,16 @@ public class ZtRefitScreen extends GunRefitScreen {
         panel(graphics, x, y, list.w(), height);
 
         // 标题 + 数量徽标（数量是玩家最关心的信息，单独给它一个胶囊）
-        graphics.drawString(this.font, I18n.get("gui.z_tweaks.refit.candidates.title"), x + 6, y + 4, ACCENT, true);
+        ThemeChrome.TitleStyle titleStyle = chrome().titleBar().style();
+        int titleColor = ACCENT;
+        if (titleStyle == ThemeChrome.TitleStyle.BANNER) {
+            int headerBottom = y + layout().listHeader() - 1;
+            graphics.fillGradient(x + 1, y + 1, x + list.w() - 1, headerBottom,
+                    ZtTheme.withAlpha(ACCENT, 0x38), ZtTheme.withAlpha(ACCENT, 0x10));
+            titleColor = ZtUi.theme().onLightPanel() ? TEXT : ACCENT_LIGHT;
+        }
+        graphics.drawString(this.font, I18n.get("gui.z_tweaks.refit.candidates.title"), x + 6, y + 4,
+                titleColor, true);
         String count = String.valueOf(candidates.size());
         int badgeW = this.font.width(count) + 9;
         int badgeX = right - 7 - badgeW;
@@ -1327,13 +1553,17 @@ public class ZtRefitScreen extends GunRefitScreen {
                 graphics.drawString(this.font, note, noteX, y + 4, BLOCKED, false);
             }
         }
-        graphics.fill(x + 4, y + LIST_HEADER - 3, right - 4, y + LIST_HEADER - 2, HAIRLINE);
+        int headerRule = y + layout().listHeader() - 3;
+        graphics.fill(x + 4, headerRule, right - 4, headerRule + 1, HAIRLINE);
+        // 标题下沿先压一小段强调色再交给发丝线：一个小小的"分节"记号，不额外占行高
+        graphics.fill(x + 4, headerRule, Math.min(x + 26, right - 4), headerRule + 1,
+                ZtTheme.withAlpha(ACCENT, 0xAA));
 
         int rows = visibleRows();
         int maxScroll = Math.max(0, candidates.size() - rows);
         scroll = Math.max(0, Math.min(scroll, maxScroll));
         hoveredRow = -1;
-        int listTop = y + LIST_HEADER;
+        int listTop = y + layout().listHeader();
 
         if (candidates.isEmpty()) {
             // 空列表有三种成因，不能混用一句：被搜索词筛没了 / 枪包压根没声明白名单 /
@@ -1351,7 +1581,7 @@ public class ZtRefitScreen extends GunRefitScreen {
         }
 
         // 裁剪：滚动/悬停的行不会越出面板边线
-        graphics.enableScissor(x + 1, listTop, right - 1, listTop + rows * ROW_H);
+        graphics.enableScissor(x + 1, listTop, right - 1, listTop + rows * layout().rowH());
         int firstBlocked = firstBlockedIndex();
         boolean liberate = liberateActive();
         for (int i = 0; i < rows && scroll + i < candidates.size(); i++) {
@@ -1376,12 +1606,22 @@ public class ZtRefitScreen extends GunRefitScreen {
                 graphics.fill(row.x() + 2, row.y() - 2, row.x() + row.w() - 2, row.y(), DIVIDER);
             }
             if (isSelected) {
-                roundedFill(graphics, row.x(), row.y(), row.w(), row.h(), ACCENT_SOFT);
+                switch (chrome().selection().style()) {
+                    case FILL -> roundedFill(graphics, row.x(), row.y(), row.w(), row.h(),
+                            ZtTheme.withAlpha(ACCENT, 0x66));
+                    case GLOW -> {
+                        roundedFill(graphics, row.x(), row.y(), row.w(), row.h(),
+                                ZtTheme.withAlpha(ACCENT, 0x30));
+                        roundedBorder(graphics, row.x(), row.y(), row.w(), row.h(), ACCENT);
+                    }
+                    default -> roundedFillGradient(graphics, row.x(), row.y(), row.w(), row.h(),
+                            ACCENT_SOFT, ZtTheme.withAlpha(ACCENT, 0x18));
+                }
             } else if (hovered) {
                 roundedFill(graphics, row.x(), row.y(), row.w(), row.h(), HOVER_OVERLAY);
             }
-            // 左侧强调竖条：选中用强调色、悬停白 —— 比整行铺色精细，也不干扰阅读
-            if (isSelected || hovered) {
+            // 左侧强调竖条：BAR 样式下选中与悬停都用；FILL/GLOW 已有整行标记，不叠竖条
+            if (hovered || (isSelected && chrome().selection().style() == ThemeChrome.SelectionStyle.BAR)) {
                 graphics.fill(row.x(), row.y() + 1, row.x() + 2, row.y() + row.h() - 1,
                         isSelected ? ACCENT : WHITE_OVERLAY);
             }
@@ -1412,7 +1652,7 @@ public class ZtRefitScreen extends GunRefitScreen {
         if (maxScroll > 0) {
             int trackX = right - 3;
             int trackTop = listTop + 1;
-            int trackH = rows * ROW_H - 2;
+            int trackH = rows * layout().rowH() - 2;
             graphics.fill(trackX, trackTop, trackX + 2, trackTop + trackH, TRACK_BG);
             int thumbH = Math.max(8, trackH * rows / candidates.size());
             int thumbY = trackTop + Math.round((trackH - thumbH) * (scroll / (float) maxScroll));
@@ -1455,7 +1695,7 @@ public class ZtRefitScreen extends GunRefitScreen {
      * 也不受"概览态不画安装 / 卸下按钮"那条规则影响 —— 两种模式下都在同一个地方。
      */
     private Rect presetRect() {
-        return new Rect(PAD, 4, 64, 14);
+        return layout().presetButton();
     }
 
     private void drawPresetButton(GuiGraphics graphics, int mouseX, int mouseY) {
@@ -1463,6 +1703,7 @@ public class ZtRefitScreen extends GunRefitScreen {
         boolean hovered = !dragging && rect.contains(mouseX, mouseY);
         boolean active = hovered || presetMenuOpen;
         roundedFill(graphics, rect.x(), rect.y(), rect.w(), rect.h(), active ? BADGE_BG_ACTIVE : BADGE_BG);
+        innerBevel(graphics, rect, active);
         roundedBorder(graphics, rect.x(), rect.y(), rect.w(), rect.h(), active ? WHITE_OVERLAY : HAIRLINE);
         graphics.drawCenteredString(this.font, I18n.get("gui.z_tweaks.refit.preset.button"),
                 rect.x() + rect.w() / 2, rect.y() + 2, active ? TEXT : TEXT_DIM);
@@ -1486,8 +1727,7 @@ public class ZtRefitScreen extends GunRefitScreen {
      * 它是"当前状态指示器"，瞥一眼就该知道现在是什么主题。
      */
     private Rect themeRect() {
-        Rect preset = presetRect();
-        return new Rect(preset.x() + preset.w() + 4, preset.y(), preset.w(), preset.h());
+        return layout().themeButton();
     }
 
     private void drawThemeButton(GuiGraphics graphics, int mouseX, int mouseY) {
@@ -1495,6 +1735,7 @@ public class ZtRefitScreen extends GunRefitScreen {
         boolean hovered = !dragging && rect.contains(mouseX, mouseY);
         boolean active = hovered || themeMenuOpen;
         roundedFill(graphics, rect.x(), rect.y(), rect.w(), rect.h(), active ? BADGE_BG_ACTIVE : BADGE_BG);
+        innerBevel(graphics, rect, active);
         roundedBorder(graphics, rect.x(), rect.y(), rect.w(), rect.h(), active ? WHITE_OVERLAY : HAIRLINE);
         roundedFill(graphics, rect.x() + 4, rect.y() + 4, 6, 6, ACCENT);
         graphics.drawString(this.font, truncate(ZtUi.theme().shortName().getString(), rect.w() - 16),
@@ -1508,7 +1749,8 @@ public class ZtRefitScreen extends GunRefitScreen {
     private List<Integer> themeMenuRows() {
         // 主题弹层的行是"主题序号 + 固定动作"，跟排序键无关 —— 上一轮批量替换误伤了这一行，已还原
         List<Integer> rows = new ArrayList<>();
-        for (int i = 0; i < ZtTheme.Id.values().length; i++) {
+        // 主题数量由注册表决定：资源包新增一套，这里自动多一行
+        for (int i = 0; i < ThemeRegistry.ids().size(); i++) {
             rows.add(i);
         }
         rows.add(TM_SEP);
@@ -1520,7 +1762,7 @@ public class ZtRefitScreen extends GunRefitScreen {
     private int themeMenuContentHeight() {
         int height = MENU_PAD * 2;
         for (int key : themeMenuRows()) {
-            height += key == TM_SEP ? MENU_SEP_H : MENU_ROW_H;
+            height += key == TM_SEP ? layout().menuSepH() : layout().menuRowH();
         }
         return height;
     }
@@ -1534,7 +1776,7 @@ public class ZtRefitScreen extends GunRefitScreen {
         Rect anchor = themeRect();
         int top = anchor.y() + anchor.h() + 2;
         int height = Math.min(themeMenuContentHeight(),
-                Math.max(MENU_ROW_H * 2 + MENU_PAD * 2, detailY() - top - 4));
+                Math.max(layout().menuRowH() * 2 + MENU_PAD * 2, detailY() - top - 4));
         int x = Math.min(anchor.x(), Math.max(2, this.width - THEME_MENU_W - 2));
         return new Rect(x, top, THEME_MENU_W, height);
     }
@@ -1547,7 +1789,7 @@ public class ZtRefitScreen extends GunRefitScreen {
         int contentY = (int) (mouseY - menu.y()) + themeMenuScroll;
         int y = MENU_PAD;
         for (int key : themeMenuRows()) {
-            int height = key == TM_SEP ? MENU_SEP_H : MENU_ROW_H;
+            int height = key == TM_SEP ? layout().menuSepH() : layout().menuRowH();
             if (contentY >= y && contentY < y + height) {
                 return key == TM_SEP ? TM_NONE : key;
             }
@@ -1559,13 +1801,12 @@ public class ZtRefitScreen extends GunRefitScreen {
     private void drawThemeMenu(GuiGraphics graphics, int mouseX, int mouseY) {
         Rect menu = themeMenuRect();
         themeMenuScroll = Mth.clamp(themeMenuScroll, 0, themeMenuMaxScroll());
-        roundedFill(graphics, menu.x(), menu.y(), menu.w(), menu.h(), MENU_BG);
-        roundedBorder(graphics, menu.x(), menu.y(), menu.w(), menu.h(), MENU_BORDER);
+        popup(graphics, menu.x(), menu.y(), menu.w(), menu.h());
         graphics.enableScissor(menu.x() + 1, menu.y() + 1, menu.x() + menu.w() - 1, menu.y() + menu.h() - 1);
         boolean inside = menu.contains(mouseX, mouseY);
         int y = menu.y() + MENU_PAD - themeMenuScroll;
         for (int key : themeMenuRows()) {
-            int height = key == TM_SEP ? MENU_SEP_H : MENU_ROW_H;
+            int height = key == TM_SEP ? layout().menuSepH() : layout().menuRowH();
             if (key == TM_SEP) {
                 graphics.fill(menu.x() + 4, y + 1, menu.x() + menu.w() - 4, y + 2, HAIRLINE);
             } else {
@@ -1575,12 +1816,13 @@ public class ZtRefitScreen extends GunRefitScreen {
                 }
                 int textColor = hovered ? TEXT : TEXT_DIM;
                 int textX = menu.x() + 15;
-                if (key >= 0 && key < ZtTheme.Id.values().length) {
-                    ZtTheme entry = ZtTheme.of(ZtTheme.Id.values()[key]);
-                    // 行内色块：直接给这套主题的面板底 + 强调色，比名字更好认
-                    roundedFill(graphics, menu.x() + 5, y + 2, 8, 7, entry.panelTop());
-                    roundedFill(graphics, menu.x() + 5, y + 9, 8, 2, entry.accent());
-                    if (entry.id() == ZtUi.theme().id()) {
+                if (key >= 0 && key < ThemeRegistry.ids().size()) {
+                    ZtTheme entry = ThemeRegistry.themeAt(key);
+                    // 行内色块：做成"缩小的面板"——面板底 + 底沿强调条 + 描边，比两块纯色方片更好认
+                    roundedFill(graphics, menu.x() + 5, y + 2, 8, 8, entry.panelTop());
+                    roundedFill(graphics, menu.x() + 6, y + 7, 6, 2, entry.accent());
+                    roundedBorder(graphics, menu.x() + 5, y + 2, 8, 8, entry.border());
+                    if (entry.id().equals(ZtUi.theme().id())) {
                         // 当前项：左边缘一条强调色（勾号字形在 MC 默认字体里不一定有）
                         graphics.fill(menu.x() + 2, y + 1, menu.x() + 4, y + height - 1, ACCENT);
                     }
@@ -1609,8 +1851,8 @@ public class ZtRefitScreen extends GunRefitScreen {
     }
 
     private String themeMenuLabel(int key) {
-        if (key >= 0 && key < ZtTheme.Id.values().length) {
-            return ZtTheme.of(ZtTheme.Id.values()[key]).displayName().getString();
+        if (key >= 0 && key < ThemeRegistry.ids().size()) {
+            return ThemeRegistry.displayNameAt(key).getString();
         }
         return switch (key) {
             case TM_ACCENT -> accentEditing
@@ -1621,19 +1863,23 @@ public class ZtRefitScreen extends GunRefitScreen {
         };
     }
 
-    /** 调色只对默认主题开放（其余主题的强调色是它调性的组成部分，见 ADR-0007 第 5 条）。 */
+    /** 调色只对声明了 accent_editable 的主题开放（目前只有默认主题，见 ADR-0008 第 2 条）。 */
     private boolean accentRowEnabled() {
-        return ZtUi.theme().id() == ZtTheme.Id.DEFAULT;
+        return ZtUi.theme().accentEditable();
     }
 
     private void clickThemeMenu(int key, int button) {
-        ZtTheme.Id[] ids = ZtTheme.Id.values();
-        if (key >= 0 && key < ids.length) {
-            ZtConfig.THEME.set(ids[key]);
+        List<String> ids = ThemeRegistry.ids();
+        if (key >= 0 && key < ids.size()) {
+            ZtTheme from = ZtUi.theme();
+            String id = ids.get(key);
+            ZtConfig.THEME.set(id);
             accentEditing = false;
-            ZtUi.refresh();
+            ThemeSpec target = ThemeRegistry.resolve(id);
+            // 180ms 调色板插值；metrics 立刻换成目标，命中用最终几何
+            beginThemeTransition(from, target);
             ZtConfig.SPEC.save();
-            notify(I18n.get("gui.z_tweaks.theme.applied", ZtUi.theme().displayName().getString()));
+            notify(I18n.get("gui.z_tweaks.theme.applied", target.theme().displayName().getString()));
             return;
         }
         switch (key) {
@@ -1647,7 +1893,7 @@ public class ZtRefitScreen extends GunRefitScreen {
                 accentText = String.format("#%06X", accentCommitted & 0xFFFFFF);
             }
             case TM_RESET -> {
-                int factory = ZtTheme.of(ZtTheme.Id.DEFAULT).accent() & 0xFFFFFF;
+                int factory = ThemeRegistry.defaultTheme().accent() & 0xFFFFFF;
                 ZtConfig.THEME_ACCENT.set(factory);
                 accentEditing = false;
                 ZtUi.refresh();
@@ -1698,7 +1944,7 @@ public class ZtRefitScreen extends GunRefitScreen {
     private int presetMenuContentHeight() {
         int height = MENU_PAD * 2;
         for (int key : presetMenuRows()) {
-            height += key == PM_SEP ? MENU_SEP_H : MENU_ROW_H;
+            height += key == PM_SEP ? layout().menuSepH() : layout().menuRowH();
         }
         return height;
     }
@@ -1715,7 +1961,7 @@ public class ZtRefitScreen extends GunRefitScreen {
         Rect anchor = namingPreset ? presetNameRect() : presetRect();
         int top = anchor.y() + anchor.h() + 2;
         int height = Math.min(presetMenuContentHeight(),
-                Math.max(MENU_ROW_H * 2 + MENU_PAD * 2, detailY() - top - 4));
+                Math.max(layout().menuRowH() * 2 + MENU_PAD * 2, detailY() - top - 4));
         return new Rect(presetRect().x(), top, PRESET_MENU_W, height);
     }
 
@@ -1728,7 +1974,7 @@ public class ZtRefitScreen extends GunRefitScreen {
         int contentY = (int) (mouseY - menu.y()) + presetMenuScroll;
         int y = MENU_PAD;
         for (int key : presetMenuRows()) {
-            int height = key == PM_SEP ? MENU_SEP_H : MENU_ROW_H;
+            int height = key == PM_SEP ? layout().menuSepH() : layout().menuRowH();
             if (contentY >= y && contentY < y + height) {
                 return key == PM_SEP ? PM_NONE : key;
             }
@@ -1740,14 +1986,13 @@ public class ZtRefitScreen extends GunRefitScreen {
     private void drawPresetMenu(GuiGraphics graphics, int mouseX, int mouseY) {
         Rect menu = presetMenuRect();
         presetMenuScroll = Mth.clamp(presetMenuScroll, 0, presetMenuMaxScroll());
-        roundedFill(graphics, menu.x(), menu.y(), menu.w(), menu.h(), MENU_BG);
-        roundedBorder(graphics, menu.x(), menu.y(), menu.w(), menu.h(), MENU_BORDER);
+        popup(graphics, menu.x(), menu.y(), menu.w(), menu.h());
         graphics.enableScissor(menu.x() + 1, menu.y() + 1, menu.x() + menu.w() - 1, menu.y() + menu.h() - 1);
         boolean inside = menu.contains(mouseX, mouseY);
         int hoveredKey = inside ? presetMenuKeyAt(mouseX, mouseY) : PM_NONE;
         int y = menu.y() + MENU_PAD - presetMenuScroll;
         for (int key : presetMenuRows()) {
-            int height = key == PM_SEP ? MENU_SEP_H : MENU_ROW_H;
+            int height = key == PM_SEP ? layout().menuSepH() : layout().menuRowH();
             if (key == PM_SEP) {
                 graphics.fill(menu.x() + 4, y + 1, menu.x() + menu.w() - 4, y + 2, HAIRLINE);
             } else {
@@ -1787,22 +2032,20 @@ public class ZtRefitScreen extends GunRefitScreen {
         };
     }
 
-    /** 命名行：按钮正下方，左边是输入框。 */
+    /** 命名行：按钮正下方，左边是输入框（布局快照）。 */
     private Rect presetNameRect() {
-        Rect button = presetRect();
-        return new Rect(button.x(), button.y() + button.h() + 2, 108, 12);
+        return layout().presetName();
     }
 
     /** 命名行右侧那颗"保存"按钮：回车之外的第二个入口（用户实测后要的）。 */
     private Rect presetSaveRect() {
-        Rect name = presetNameRect();
-        return new Rect(name.x() + name.w() + 4, name.y(), 40, 12);
+        return layout().presetSave();
     }
 
     /** 确认 / 导入预览面板：与弹层同一处起头（左上角往下），玩家点了才动手。 */
     private Rect presetConfirmRect() {
         int width = 250;
-        int height = MENU_PAD * 2 + presetConfirmLines().size() * 11 + MENU_ROW_H + 2;
+        int height = MENU_PAD * 2 + presetConfirmLines().size() * 11 + layout().menuRowH() + 2;
         int top = presetRect().y() + presetRect().h() + 2;
         return new Rect(presetRect().x(), Math.min(top, Math.max(2, this.height - height - 4)), width, height);
     }
@@ -1836,7 +2079,7 @@ public class ZtRefitScreen extends GunRefitScreen {
         if (!panel.contains(mouseX, mouseY)) {
             return -1;
         }
-        int rowTop = panel.y() + panel.h() - MENU_ROW_H - 2;
+        int rowTop = panel.y() + panel.h() - layout().menuRowH() - 2;
         if (mouseY < rowTop) {
             return -1;
         }
@@ -1845,16 +2088,16 @@ public class ZtRefitScreen extends GunRefitScreen {
 
     private void drawPresetConfirm(GuiGraphics graphics, int mouseX, int mouseY) {
         Rect panel = presetConfirmRect();
-        roundedFill(graphics, panel.x(), panel.y(), panel.w(), panel.h(), MENU_BG);
-        roundedBorder(graphics, panel.x(), panel.y(), panel.w(), panel.h(), MENU_BORDER);
+        popup(graphics, panel.x(), panel.y(), panel.w(), panel.h());
         List<String> lines = presetConfirmLines();
         for (int i = 0; i < lines.size(); i++) {
             graphics.drawString(this.font, truncate(lines.get(i), panel.w() - 14),
                     panel.x() + 7, panel.y() + MENU_PAD + i * 11, i == 0 ? TEXT : TEXT_DIM, false);
         }
-        Rect ok = new Rect(panel.x() + 4, panel.y() + panel.h() - MENU_ROW_H - 2,
-                panel.w() / 2 - 6, MENU_ROW_H);
-        Rect cancel = new Rect(panel.x() + panel.w() / 2 + 2, ok.y(), panel.w() / 2 - 6, MENU_ROW_H);
+        int rowH = layout().menuRowH();
+        Rect ok = new Rect(panel.x() + 4, panel.y() + panel.h() - rowH - 2,
+                panel.w() / 2 - 6, rowH);
+        Rect cancel = new Rect(panel.x() + panel.w() / 2 + 2, ok.y(), panel.w() / 2 - 6, rowH);
         boolean okHover = !dragging && ok.contains(mouseX, mouseY);
         boolean cancelHover = !dragging && cancel.contains(mouseX, mouseY);
         button(graphics, this.font, ok, I18n.get("gui.z_tweaks.refit.preset.confirm"), okHover, true, true);
@@ -1866,6 +2109,7 @@ public class ZtRefitScreen extends GunRefitScreen {
         boolean hovered = !dragging && rect.contains(mouseX, mouseY);
         boolean active = hovered || sortMenuOpen;
         roundedFill(graphics, rect.x(), rect.y(), rect.w(), rect.h(), active ? BADGE_BG_ACTIVE : BADGE_BG);
+        innerBevel(graphics, rect, active);
         roundedBorder(graphics, rect.x(), rect.y(), rect.w(), rect.h(), active ? WHITE_OVERLAY : HAIRLINE);
         graphics.drawCenteredString(this.font, truncate(sortLabel(), rect.w() - 6),
                 rect.x() + rect.w() / 2, rect.y() + 2, active ? TEXT : TEXT_DIM);
@@ -1884,14 +2128,13 @@ public class ZtRefitScreen extends GunRefitScreen {
     private void drawSortMenu(GuiGraphics graphics, int mouseX, int mouseY) {
         Rect menu = sortMenuRect();
         sortMenuScroll = Mth.clamp(sortMenuScroll, 0, sortMenuMaxScroll());
-        roundedFill(graphics, menu.x(), menu.y(), menu.w(), menu.h(), MENU_BG);
-        roundedBorder(graphics, menu.x(), menu.y(), menu.w(), menu.h(), MENU_BORDER);
+        popup(graphics, menu.x(), menu.y(), menu.w(), menu.h());
         // 内容可能高过视口（见 sortMenuRect），超出部分一律裁掉，而不是画到面板外面去
         graphics.enableScissor(menu.x() + 1, menu.y() + 1, menu.x() + menu.w() - 1, menu.y() + menu.h() - 1);
         boolean inside = menu.contains(mouseX, mouseY);
         int y = menu.y() + MENU_PAD - sortMenuScroll;
         for (SortKey key : SORT_MENU_ROWS) {
-            int height = key.code() == MENU_SEP ? MENU_SEP_H : MENU_ROW_H;
+            int height = key.code() == MENU_SEP ? layout().menuSepH() : layout().menuRowH();
             if (key.code() == MENU_SEP) {
                 graphics.fill(menu.x() + 4, y + 1, menu.x() + menu.w() - 4, y + 2, HAIRLINE);
             } else {
@@ -1942,10 +2185,11 @@ public class ZtRefitScreen extends GunRefitScreen {
     }
 
     private void drawDetail(GuiGraphics graphics, int mouseX, int mouseY) {
-        int x = PAD;
-        int width = this.width - PAD * 2;
-        int y = detailY();
-        int height = DETAIL_H;
+        Rect detail = layout().detail();
+        int x = detail.x();
+        int width = detail.w();
+        int y = detail.y();
+        int height = detail.h();
         panel(graphics, x, y, width, height);
         // 左侧一道强调色竖条，把"这里是当前查看的配件"点明
         graphics.fill(x, y + 1, x + 2, y + height - 1, ACCENT);
@@ -1966,6 +2210,17 @@ public class ZtRefitScreen extends GunRefitScreen {
         int entryTop = y + 5;
         // 条目数按按钮位置反推，避免最后一行压到按钮上（按钮挪了这里自动跟着变）
         int entryLimit = Math.max(1, (installRect().y() - 2 - entryTop) / 10);
+        // 栏间软引导线：只画到按钮上方，避免从"安装 / 卸下"中间穿过去。
+        // 概览态的信息卡是另一套三等分（见 drawGunInfo），这里只处理"选中槽位"的三栏。
+        if (RefitTransform.getCurrentTransformType() != AttachmentType.NONE) {
+            int guideBottom = installRect().y() - 4;
+            int leftSep = detailLeft() + leftWidth + DETAIL_LEFT_GAP / 2;
+            graphics.fill(leftSep, y + 4, leftSep + 1, guideBottom, DIVIDER_SOFT);
+            for (int i = 0; i < 2; i++) {
+                int sep = detailColumnLeft(i) + columnWidth + DETAIL_COLUMN_GAP / 2;
+                graphics.fill(sep, y + 4, sep + 1, guideBottom, DIVIDER_SOFT);
+            }
+        }
         drawPropertyColumn(graphics, columnX, columnWidth, entryTop, entryLimit, pros, GOOD);
         drawPropertyColumn(graphics, detailColumnLeft(1), columnWidth, entryTop, entryLimit, cons, BAD);
         drawParamChanges(graphics, detailColumnLeft(2), columnWidth, entryTop, entryLimit);
@@ -2068,11 +2323,11 @@ public class ZtRefitScreen extends GunRefitScreen {
                 widest = Math.max(widest, this.font.width(text));
             }
             // 诊断文字直接盖在世界上会糊成一片，垫一层半透明底衬
-            roundedFill(graphics, PAD - 3, 4, widest + 8, lines.size() * 10 + 6, HUD_BG);
-            roundedBorder(graphics, PAD - 3, 4, widest + 8, lines.size() * 10 + 6, HAIRLINE);
+            roundedFill(graphics, layout().pad() - 3, 4, widest + 8, lines.size() * 10 + 6, HUD_BG);
+            roundedBorder(graphics, layout().pad() - 3, 4, widest + 8, lines.size() * 10 + 6, HAIRLINE);
             int y = 8;
             for (String text : lines) {
-                graphics.drawString(this.font, text, PAD, y, HUD_TEXT, true);
+                graphics.drawString(this.font, text, layout().pad(), y, HUD_TEXT, true);
                 y += 10;
             }
         }
@@ -2096,7 +2351,11 @@ public class ZtRefitScreen extends GunRefitScreen {
         int h = 14;
         int x = (this.width - w) / 2;
         int y = detailY() - h - 8;
+        // 投影跟着弹条一起淡出（直接复用 alpha，避免最后一帧"影子先没"）
+        roundedFill(graphics, x + 2, y + 3, w, h, (alpha * 0x30 / 255) << 24);
         roundedFill(graphics, x, y, w, h, ZtTheme.withAlpha(TOAST_BG, alpha));
+        // 上沿一点受光面，弹条不再是一块死板的深色方块（左侧强调条从 x+3 起，不会盖住）
+        graphics.fill(x + 3, y + 1, x + w - 1, y + 2, ZtTheme.withAlpha(0xFFFFFF, alpha * 0x16 / 255));
         roundedBorder(graphics, x, y, w, h, ZtTheme.withAlpha(TOAST_EDGE, alpha));
         graphics.fill(x + 1, y + 1, x + 3, y + h - 1, ZtTheme.withAlpha(ACCENT, alpha));
         graphics.drawCenteredString(this.font, popup, x + w / 2 + 1, y + 3, ZtTheme.withAlpha(ACCENT_LIGHT, alpha));
@@ -2220,7 +2479,7 @@ public class ZtRefitScreen extends GunRefitScreen {
         // 右键在这里就早退，才不会落到底部"空白处=平移"那一支去拖相机。
         List<AttachmentType> types = slotTypes();
         for (int i = 0; i < types.size(); i++) {
-            if (slotRect(types, i).contains(mouseX, mouseY)) {
+            if (slotRect(i).contains(mouseX, mouseY)) {
                 if (button == 1) {
                     unloadSlot(types.get(i));
                 } else {
@@ -2337,19 +2596,19 @@ public class ZtRefitScreen extends GunRefitScreen {
     public boolean mouseScrolled(double mouseX, double mouseY, double delta) {
         // 预设弹层同理：指针落在它上面就滚它自己
         if (presetMenuOpen && presetMenuRect().contains(mouseX, mouseY)) {
-            presetMenuScroll = Mth.clamp(presetMenuScroll - (int) Math.signum(delta) * MENU_ROW_H,
+            presetMenuScroll = Mth.clamp(presetMenuScroll - (int) Math.signum(delta) * layout().menuRowH(),
                     0, presetMenuMaxScroll());
             return true;
         }
         // 主题弹层同理
         if (themeMenuOpen && themeMenuRect().contains(mouseX, mouseY)) {
-            themeMenuScroll = Mth.clamp(themeMenuScroll - (int) Math.signum(delta) * MENU_ROW_H,
+            themeMenuScroll = Mth.clamp(themeMenuScroll - (int) Math.signum(delta) * layout().menuRowH(),
                     0, themeMenuMaxScroll());
             return true;
         }
         // 弹出层展开时，指针落在它上面就滚它自己（内容可能高过视口），不穿透给底下的列表
         if (sortMenuOpen && sortMenuRect().contains(mouseX, mouseY)) {
-            sortMenuScroll = Mth.clamp(sortMenuScroll - (int) Math.signum(delta) * MENU_ROW_H,
+            sortMenuScroll = Mth.clamp(sortMenuScroll - (int) Math.signum(delta) * layout().menuRowH(),
                     0, sortMenuMaxScroll());
             return true;
         }
@@ -2928,7 +3187,9 @@ public class ZtRefitScreen extends GunRefitScreen {
 
     /** 候选面板当前能显示几行。几何与 {@link #listRect()} 同源，不会与绘制漂移。 */
     private int visibleRows() {
-        return Math.max(1, (listRect().h() - LIST_HEADER - LIST_FOOTER) / ROW_H);
+        RefitLayout snapshot = layout();
+        return Math.max(1, (snapshot.list().h() - snapshot.listHeader() - snapshot.listFooter())
+                / snapshot.rowH());
     }
 
     private void ensureSelectionVisible() {
@@ -2969,11 +3230,11 @@ public class ZtRefitScreen extends GunRefitScreen {
     }
 
     private Rect installRect() {
-        return new Rect(PAD + this.width - PAD * 2 - 136, detailY() + DETAIL_H - 16, 64, 14);
+        return layout().install();
     }
 
     private Rect unloadRect() {
-        return new Rect(PAD + this.width - PAD * 2 - 68, detailY() + DETAIL_H - 16, 64, 14);
+        return layout().unload();
     }
 
     private String nameOf(ItemStack stack) {
@@ -3289,7 +3550,9 @@ public class ZtRefitScreen extends GunRefitScreen {
 
     /** 变化列（第三列）的矩形：滚轮判定与绘制同源 —— 列位只从 detailColumnLeft 取。 */
     private Rect deltaColumnRect() {
-        return new Rect(detailColumnLeft(2), detailY(), detailColumnWidth(), DETAIL_H);
+        RefitLayout snapshot = layout();
+        return new Rect(detailColumnLeft(2), snapshot.detail().y(),
+                snapshot.detailColumnWidth(), snapshot.detail().h());
     }
 
     /**
@@ -3316,7 +3579,7 @@ public class ZtRefitScreen extends GunRefitScreen {
     }
 
     /**
-     * 三列铺进详情条，各列独立滚动，文字按 {@link #INFO_SCALE} 缩放。
+     * 三列铺进详情条，各列独立滚动，文字按主题的 {@code info_font_scale}（默认 0.8）缩放。
      *
      * <p>缩放靠 {@code pose.scale}，所以坐标全在"局部空间"里：列宽要先除以缩放系数
      * 换算成局部宽度再交给 {@code font.split}，否则折行位置会算错。</p>
@@ -3329,7 +3592,8 @@ public class ZtRefitScreen extends GunRefitScreen {
         }
         int usable = width - 12;
         float screenUnit = usable / shareTotal;
-        float localUnit = screenUnit / INFO_SCALE;
+        float scale = layout().infoScale();
+        float localUnit = screenUnit / scale;
 
         // 指针在哪一列：滚轮据此决定滚哪一列（屏幕坐标，不受缩放影响）
         infoHoverColumn = -1;
@@ -3344,10 +3608,19 @@ public class ZtRefitScreen extends GunRefitScreen {
 
         List<List<Component>> columns = List.of(infoMain, infoStats, infoExtra);
         infoColumnLines = new int[INFO_COLUMNS];
+        // 三列之间的软引导线：画在屏幕空间（不跟 0.8 缩放），只分栏不抢字
+        int guideTop = y + 4;
+        int guideBottom = y + layout().detail().h() - 5;
+        float boundary = x + 6;
+        for (int c = 0; c < INFO_COLUMNS - 1; c++) {
+            boundary += INFO_COLUMN_SHARE[c] * screenUnit;
+            int sep = (int) boundary;
+            graphics.fill(sep, guideTop, sep + 1, guideBottom, DIVIDER_SOFT);
+        }
         PoseStack pose = graphics.pose();
         pose.pushPose();
         pose.translate(x + 6, y + 4, 0);
-        pose.scale(INFO_SCALE, INFO_SCALE, 1f);
+        pose.scale(scale, scale, 1f);
         float localLeft = 0f;
         for (int c = 0; c < INFO_COLUMNS; c++) {
             float localWidth = INFO_COLUMN_SHARE[c] * localUnit;
@@ -3368,16 +3641,17 @@ public class ZtRefitScreen extends GunRefitScreen {
 
     /** 详情条矩形：概览态下滚轮落在这里才滚信息卡。 */
     private Rect detailRect() {
-        return new Rect(detailLeft(), detailY(), detailWidth(), DETAIL_H);
+        return layout().detail();
     }
 
     /** 详情条左列（配件名字 + 描述）矩形：选中配件时滚轮落在这里才滚描述。 */
     private Rect attachColumnRect() {
-        return new Rect(detailLeft(), detailY(), detailLeftWidth(), DETAIL_H);
+        Rect detail = layout().detail();
+        return new Rect(detail.x(), detail.y(), layout().detailLeftWidth(), detail.h());
     }
 
     /**
-     * 配件卡的左列（名字 + 描述）：排版与概览态信息卡对齐 —— {@link #INFO_SCALE} 缩放、
+     * 配件卡的左列（名字 + 描述）：排版与概览态信息卡对齐 —— 按主题的 {@code info_font_scale} 缩放、
      * 按列宽换行、滚轮可翻。
      *
      * <p>名字仍用强调色而不是白色：它标的是"当前查看的配件"，跟候选列表的选中态呼应。
@@ -3421,16 +3695,17 @@ public class ZtRefitScreen extends GunRefitScreen {
         }
 
         graphics.renderItem(candidate, x + 6, y + 4);
-        int rows = Math.max(1, (int) ((DETAIL_H - 12) / (INFO_LINE_H * INFO_SCALE)));
+        float scale = layout().infoScale();
+        int rows = Math.max(1, (int) ((layout().detail().h() - 12) / (INFO_LINE_H * scale)));
         List<FormattedCharSequence> wrapped = new ArrayList<>();
         for (Component line : lines) {
-            wrapped.addAll(this.font.split(line, (int) ((columnWidth - 32) / INFO_SCALE)));
+            wrapped.addAll(this.font.split(line, (int) ((columnWidth - 32) / scale)));
         }
         attachScroll = Mth.clamp(attachScroll, 0, Math.max(0, wrapped.size() - rows));
         PoseStack pose = graphics.pose();
         pose.pushPose();
         pose.translate(x + 26, y + 4, 0);
-        pose.scale(INFO_SCALE, INFO_SCALE, 1f);
+        pose.scale(scale, scale, 1f);
         for (int i = attachScroll; i < Math.min(wrapped.size(), attachScroll + rows); i++) {
             graphics.drawString(this.font, recolorInk(wrapped.get(i)), 0,
                     (i - attachScroll) * INFO_LINE_H, TEXT, false);
@@ -3484,13 +3759,13 @@ public class ZtRefitScreen extends GunRefitScreen {
     }
 
     /** 槽位间距：至少能放下最宽的本地化槽位名，同时不让整条超出屏幕。 */
-    private int slotStep(List<AttachmentType> types) {
+    private int slotStep(List<AttachmentType> types, int slot, int pad) {
         int widest = 0;
         for (AttachmentType type : types) {
             widest = Math.max(widest, this.font.width(slotName(type)));
         }
-        int wanted = Math.max(SLOT + 2, widest + 6);
-        int affordable = Math.max(SLOT + 2, (this.width - PAD * 2 - 8) / Math.max(1, types.size()));
+        int wanted = Math.max(slot + 2, widest + 6);
+        int affordable = Math.max(slot + 2, (this.width - pad * 2 - 8) / Math.max(1, types.size()));
         return Math.min(wanted, affordable);
     }
 

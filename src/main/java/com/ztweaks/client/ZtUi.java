@@ -88,16 +88,55 @@ public final class ZtUi {
     public static int ACCENT_MARK = 0xAA55FFFF;
     public static int MENU_SCROLL_HINT = 0x66000000;
     public static int TOAST_EDGE = 0xFF4A5158;
+    /** 面板 / 弹出层的内侧高光与暗边、栏间软分隔线（都由主题派生，见 {@link ZtTheme}）。 */
+    public static int PANEL_HIGHLIGHT = 0x14FFFFFF;
+    public static int PANEL_SHADE = 0x30000000;
+    public static int MENU_HIGHLIGHT = 0x18FFFFFF;
+    public static int MENU_SHADE = 0x30000000;
+    public static int DIVIDER_SOFT = 0x33FFFFFF;
 
     /** 圆角半径（0 = 直角）与面板质感。 */
     public static int CORNER = 1;
     public static ZtTheme.Surface SURFACE = ZtTheme.Surface.GRADIENT;
 
-    private static ZtTheme current = ZtTheme.of(ZtTheme.Id.DEFAULT);
+    private static ZtTheme current = ThemeRegistry.fallbackTheme();
+    private static ThemeMetrics metrics = ThemeMetrics.DEFAULT;
+    private static ThemeChrome activeChrome = ThemeChrome.DEFAULT;
+    private static ThemeEffect activeEffect = ThemeEffect.NONE;
 
     /** 当前主题（按钮显示、弹层打勾用）。 */
     public static ZtTheme theme() {
         return current;
+    }
+
+    /** 当前主题的受控布局参数（布局快照的唯一来源）。 */
+    public static ThemeMetrics metrics() {
+        return metrics;
+    }
+
+    /** 当前主题的装饰层（外框 / 标题 / 角饰 / 底纹 / 选中态 / 按钮面）。 */
+    public static ThemeChrome chrome() {
+        return activeChrome;
+    }
+
+    /** 当前主题的氛围动效定义（是否播放由动效档位与自动降级决定）。 */
+    public static ThemeEffect effect() {
+        return activeEffect;
+    }
+
+    // 过渡期的受控写入点：切主题时按 0.5 的切换点换 chrome / effect / metrics，
+    // 调色板由 ZtTheme.lerp 每帧 apply。平常只有 refresh() 写这些字段。
+
+    public static void setChrome(ThemeChrome value) {
+        activeChrome = value;
+    }
+
+    public static void setEffect(ThemeEffect value) {
+        activeEffect = value;
+    }
+
+    public static void setMetrics(ThemeMetrics value) {
+        metrics = value;
     }
 
     /** 圆角半径的别名，读起来更顺（{@code ZtUi.corner()}）。 */
@@ -114,9 +153,13 @@ public final class ZtUi {
      * 在这里按主题 id 取色即可（那时的注释与 ADR 一起改）。</p>
      */
     public static void refresh() {
-        ZtTheme.Id id = ZtConfig.THEME.get();
-        ZtTheme theme = ZtTheme.of(id);
-        int override = id == ZtTheme.Id.DEFAULT ? ZtConfig.THEME_ACCENT.get() : -1;
+        ThemeSpec spec = ThemeRegistry.resolve(ZtConfig.THEME.get());
+        ZtTheme theme = spec.theme();
+        metrics = spec.metrics();
+        activeChrome = spec.chrome();
+        activeEffect = spec.effect();
+        // 强调色只对声明了 accent_editable 的主题生效（目前只有默认主题，见 ADR-0008）
+        int override = theme.accentEditable() ? ZtConfig.THEME_ACCENT.get() : -1;
         apply(theme, override);
     }
 
@@ -164,6 +207,11 @@ public final class ZtUi {
         ACCENT_MARK = theme.accentMark();
         MENU_SCROLL_HINT = theme.menuScrollHint();
         TOAST_EDGE = theme.toastEdge();
+        PANEL_HIGHLIGHT = theme.panelHighlight();
+        PANEL_SHADE = theme.panelShade();
+        MENU_HIGHLIGHT = theme.menuHighlight();
+        MENU_SHADE = theme.menuShade();
+        DIVIDER_SOFT = theme.dividerSoft();
         CORNER = theme.corner();
         SURFACE = theme.surface();
     }
@@ -193,6 +241,24 @@ public final class ZtUi {
         graphics.fill(x + w - r, y + r, x + w, y + h - r, color);
     }
 
+    /**
+     * 圆角矩形 + 纵向渐变填充：与 {@link #roundedFill} 同样缺角，左中右三块各自铺同一段渐变，
+     * 拼起来看不出接缝。选中行、当前槽位这类"要一点厚度"的小矩形用它。
+     */
+    public static void roundedFillGradient(GuiGraphics graphics, int x, int y, int w, int h, int top, int bottom) {
+        if (w <= 0 || h <= 0) {
+            return;
+        }
+        int r = Math.max(0, Math.min(CORNER, Math.min(w, h) / 2));
+        if (r == 0) {
+            graphics.fillGradient(x, y, x + w, y + h, top, bottom);
+            return;
+        }
+        graphics.fillGradient(x + r, y, x + w - r, y + h, top, bottom);
+        graphics.fillGradient(x, y + r, x + r, y + h - r, top, bottom);
+        graphics.fillGradient(x + w - r, y + r, x + w, y + h - r, top, bottom);
+    }
+
     /** 圆角描边，与 {@link #roundedFill} 配套（同样缺角，否则边框会比填充多出一角）。 */
     public static void roundedBorder(GuiGraphics graphics, int x, int y, int w, int h, int color) {
         int r = Math.max(0, Math.min(CORNER, Math.min(w, h) / 2));
@@ -214,7 +280,12 @@ public final class ZtUi {
     }
 
     /**
-     * 面板标准外观：底色（渐变 / 纯色 / 半透明）+ 圆角 + 描边。全场统一，各处不再自己调色。
+     * 面板标准外观：底色（渐变 / 纯色 / 半透明）+ 圆角 + 内侧高光与暗边 + 描边。全场统一，
+     * 各处不再自己调色。
+     *
+     * <p>内侧那一圈是这一轮加的"厚度"：默认 / MD3 只在上下各压 1px（很淡的环境光），
+     * Win 经典四面都压（上下亮、下边暗，银灰浮雕），千禧航空再加一条渐隐高光带当玻璃反光。
+     * 全部是画在底色之上的像素，不碰布局、不碰命中。</p>
      */
     public static void panel(GuiGraphics graphics, int x, int y, int w, int h) {
         if (SURFACE == ZtTheme.Surface.SOLID || PANEL_TOP == PANEL_BOTTOM) {
@@ -224,7 +295,131 @@ public final class ZtUi {
             graphics.fill(x, y + 1, x + 1, y + h - 1, PANEL_TOP);
             graphics.fill(x + w - 1, y + 1, x + w, y + h - 1, PANEL_BOTTOM);
         }
-        roundedBorder(graphics, x, y, w, h, HAIRLINE);
+        int r = Math.max(0, Math.min(CORNER, Math.min(w, h) / 2));
+        if (SURFACE == ZtTheme.Surface.GLASS) {
+            // 顶部一条渐隐高光带：1.20.1 没有背景模糊，"玻璃感"只能靠这层反光骗眼睛。
+            // 高度封顶 28px —— 面板一高就整片泛白，白字会先糊掉。
+            int band = Math.min(28, Math.max(4, h / 3));
+            graphics.fillGradient(x + 1, y + 1, x + w - 1, y + band,
+                    ZtTheme.withAlpha(0xFFFFFF, 0x1A), ZtTheme.withAlpha(0xFFFFFF, 0x00));
+        }
+        int inset = 1 + r;
+        graphics.fill(x + inset, y + 1, x + w - inset, y + 2, PANEL_HIGHLIGHT);
+        graphics.fill(x + inset, y + h - 2, x + w - inset, y + h - 1, PANEL_SHADE);
+        if (SURFACE == ZtTheme.Surface.SOLID) {
+            graphics.fill(x + 1, y + inset, x + 2, y + h - inset, PANEL_HIGHLIGHT);
+            graphics.fill(x + w - 2, y + inset, x + w - 1, y + h - inset, PANEL_SHADE);
+        }
+        pattern(graphics, x, y, w, h);
+        frame(graphics, x, y, w, h, activeChrome.frame().panel(), HAIRLINE, PANEL_HIGHLIGHT, PANEL_SHADE);
+        corners(graphics, x, y, w, h);
+    }
+
+    /**
+     * 面板底纹：横向扫描线 / 细网格，颜色取自重主题的次要文字色，透明度由主题声明。
+     * 画在内容之下、边框之上，用 scissor 裁在面板内。
+     */
+    private static void pattern(GuiGraphics graphics, int x, int y, int w, int h) {
+        ThemeChrome.Pattern pattern = activeChrome.pattern();
+        if (pattern.style() == ThemeChrome.PatternStyle.NONE || pattern.alpha() <= 0f) {
+            return;
+        }
+        int alpha = Math.max(0, Math.min(255, Math.round(pattern.alpha() * 255f)));
+        int line = ZtTheme.withAlpha(TEXT_MUTED, alpha);
+        graphics.enableScissor(x + 1, y + 1, x + w - 1, y + h - 1);
+        if (pattern.style() == ThemeChrome.PatternStyle.SCANLINE) {
+            for (int yy = y + 2; yy < y + h - 2; yy += 4) {
+                graphics.fill(x + 1, yy, x + w - 1, yy + 1, line);
+            }
+        } else {
+            for (int yy = y + 2; yy < y + h - 2; yy += 8) {
+                graphics.fill(x + 1, yy, x + w - 1, yy + 1, line);
+            }
+            for (int xx = x + 4; xx < x + w - 2; xx += 8) {
+                graphics.fill(xx, y + 1, xx + 1, y + h - 1, line);
+            }
+        }
+        graphics.disableScissor();
+    }
+
+    /** 外框样式：发丝线 / 立体边 / 双线 / 无。 */
+    private static void frame(GuiGraphics graphics, int x, int y, int w, int h,
+                              ThemeChrome.FrameStyle style, int border, int highlight, int shade) {
+        switch (style) {
+            case NONE -> {
+            }
+            case BEVEL -> {
+                roundedBorder(graphics, x, y, w, h, border);
+                int inset = 2;
+                graphics.fill(x + inset, y + inset, x + w - inset, y + inset + 1, highlight);
+                graphics.fill(x + inset, y + h - inset - 1, x + w - inset, y + h - inset, shade);
+                graphics.fill(x + inset, y + inset, x + inset + 1, y + h - inset, highlight);
+                graphics.fill(x + w - inset - 1, y + inset, x + w - inset, y + h - inset, shade);
+            }
+            case DOUBLE -> {
+                roundedBorder(graphics, x, y, w, h, border);
+                roundedBorder(graphics, x + 2, y + 2, w - 4, h - 4, ZtTheme.withAlpha(ACCENT, 0x55));
+            }
+            default -> roundedBorder(graphics, x, y, w, h, border);
+        }
+    }
+
+    /** 四角 L 形角标：只画短线，不描整圈，避免把小面板挤满。 */
+    private static void corners(GuiGraphics graphics, int x, int y, int w, int h) {
+        if (activeChrome.corners().style() != ThemeChrome.CornerStyle.BRACKETS) {
+            return;
+        }
+        int len = 6;
+        int color = ZtTheme.withAlpha(ACCENT, 0xCC);
+        graphics.fill(x, y, x + len, y + 1, color);
+        graphics.fill(x, y, x + 1, y + len, color);
+        graphics.fill(x + w - len, y, x + w, y + 1, color);
+        graphics.fill(x + w - 1, y, x + w, y + len, color);
+        graphics.fill(x, y + h - 1, x + len, y + h, color);
+        graphics.fill(x, y + h - len, x + 1, y + h, color);
+        graphics.fill(x + w - len, y + h - 1, x + w, y + h, color);
+        graphics.fill(x + w - 1, y + h - len, x + w, y + h, color);
+    }
+
+    /**
+     * 浮层投影：两层错位的半透明黑，让弹层 / 弹条从 3D 画面上浮起来。
+     * 只画在元素背后，不占布局；画完再由调用方铺自己的底。
+     */
+    public static void shadow(GuiGraphics graphics, int x, int y, int w, int h) {
+        roundedFill(graphics, x + 2, y + 3, w, h, 0x33000000);
+        roundedFill(graphics, x + 1, y + 1, w, h, 0x1C000000);
+    }
+
+    /**
+     * 弹层标准外框：投影 + {@code MENU_BG} 底 + 内侧高光/暗边 + 描边。
+     *
+     * <p>只负责"外框"这一层 —— 行序列、内容高、命中与逐行绘制仍留在各自的弹层里
+     * （三套弹层骨架合一已确认不做，这里不碰那部分）。</p>
+     */
+    public static void popup(GuiGraphics graphics, int x, int y, int w, int h) {
+        shadow(graphics, x, y, w, h);
+        roundedFill(graphics, x, y, w, h, MENU_BG);
+        if (SURFACE == ZtTheme.Surface.GLASS) {
+            int band = Math.min(20, Math.max(4, h / 3));
+            graphics.fillGradient(x + 1, y + 1, x + w - 1, y + band,
+                    ZtTheme.withAlpha(0xFFFFFF, 0x1A), ZtTheme.withAlpha(0xFFFFFF, 0x00));
+        }
+        int r = Math.max(0, Math.min(CORNER, Math.min(w, h) / 2));
+        int inset = 1 + r;
+        graphics.fill(x + inset, y + 1, x + w - inset, y + 2, MENU_HIGHLIGHT);
+        graphics.fill(x + inset, y + h - 2, x + w - inset, y + h - 1, MENU_SHADE);
+        if (SURFACE == ZtTheme.Surface.SOLID) {
+            graphics.fill(x + 1, y + inset, x + 2, y + h - inset, MENU_HIGHLIGHT);
+            graphics.fill(x + w - 2, y + inset, x + w - 1, y + h - inset, MENU_SHADE);
+        }
+        frame(graphics, x, y, w, h, activeChrome.frame().popup(), MENU_BORDER, MENU_HIGHLIGHT, MENU_SHADE);
+    }
+
+    /** 在内侧上沿压一条 1px 高光：让"预设 / 主题 / 排序"这类平面小按钮也有一点点凸起感。 */
+    public static void innerBevel(GuiGraphics graphics, Rect rect, boolean raised) {
+        int r = Math.max(0, Math.min(CORNER, Math.min(rect.w(), rect.h()) / 2));
+        graphics.fill(rect.x() + 1 + r, rect.y() + 1, rect.x() + rect.w() - 1 - r, rect.y() + 2,
+                ZtTheme.withAlpha(0xFFFFFF, raised ? 0x3A : 0x1C));
     }
 
     /**
@@ -251,9 +446,23 @@ public final class ZtUi {
             borderColor = current.buttonBorder(semantic, hovered);
             textColor = hovered ? current.buttonText() : TEXT;
         }
-        graphics.fillGradient(rect.x() + 1, rect.y(), rect.x() + rect.w() - 1, rect.y() + rect.h(), top, bottom);
-        graphics.fill(rect.x(), rect.y() + 1, rect.x() + 1, rect.y() + rect.h() - 1, top);
-        graphics.fill(rect.x() + rect.w() - 1, rect.y() + 1, rect.x() + rect.w(), rect.y() + rect.h() - 1, bottom);
+        ThemeChrome.ButtonStyle style = activeChrome.button().style();
+        if (style == ThemeChrome.ButtonStyle.FLAT) {
+            int fill = enabled && hovered ? ZtTheme.mix(top, 0xFFFFFFFF, 0.10f) : top;
+            roundedFill(graphics, rect.x(), rect.y(), rect.w(), rect.h(), fill);
+        } else {
+            roundedFillGradient(graphics, rect.x(), rect.y(), rect.w(), rect.h(), top, bottom);
+            if (enabled) {
+                // 上沿一层高光 = 按键的"受光面"；悬停时更亮，配合底色变化，三态更容易分辨。
+                // BEVEL 再把高光提一档，和 FLAT 拉开差别。
+                int alpha = style == ThemeChrome.ButtonStyle.BEVEL
+                        ? (hovered ? 0x5A : 0x38)
+                        : (hovered ? 0x3C : 0x20);
+                int r = Math.max(0, Math.min(CORNER, Math.min(rect.w(), rect.h()) / 2));
+                graphics.fill(rect.x() + 1 + r, rect.y() + 1, rect.x() + rect.w() - 1 - r,
+                        rect.y() + 2, ZtTheme.withAlpha(0xFFFFFF, alpha));
+            }
+        }
         roundedBorder(graphics, rect.x(), rect.y(), rect.w(), rect.h(), borderColor);
         graphics.drawCenteredString(font, label, rect.x() + rect.w() / 2, rect.y() + 4, textColor);
     }

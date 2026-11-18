@@ -3,19 +3,23 @@ package com.ztweaks.client;
 import net.minecraft.network.chat.Component;
 
 /**
- * 一套界面外观的取值：颜色 + 圆角 + 面板质感（见 ADR-0007）。
+ * 一套主题的调色板与质感取值（见 ADR-0008）。
  *
- * <p><b>主题表写在代码里</b>，不引入外部主题文件 —— 玩家要的是"点一下换个样子"，不是一套主题协议。
- * 每个主题只填"原始色"，派生量（强调色的柔和版 / 提亮版、压在其上的文字色、悬停叠加…）由
- * {@link #accentSoft()} 这类方法算出来，主题表因此能保持十几行的长度。</p>
+ * <p><b>数据来自资源</b>：内置主题是 {@code assets/z_tweaks/themes/<id>.json}，由
+ * {@link ThemeRegistry} 解析；资源包可以覆盖或新增。这个 record 只承载"已经解析好的一组值"，
+ * 派生量（强调色的柔和版 / 提亮版、压在其上的文字色、悬停叠加…）仍由 {@link #accentSoft()}
+ * 这类方法算出来，主题表因此能保持十几行的长度。</p>
  *
- * <p><b>不改布局</b>：行高、面板宽、字号、内边距全局一套 —— 那些数字同时参与绘制、裁剪与命中检测，
- * 主题化等于每个主题一套点击判定。</p>
+ * <p><b>布局受控</b>：行高、面板宽、字号、内边距不在这里 —— 它们只允许通过
+ * {@link ThemeMetrics} 的五个参数调整，且由唯一的布局函数消费。颜色/质感随便换，
+ * 命中判定的几何只有一套。</p>
  *
- * <p><b>"神似"而非考据</b>：关键色取近似值，一眼能认出风格即可，不抄字体与图标；名字用风格描述
- * 而不是厂商名（lang key 见 {@code gui.z_tweaks.theme.name.*}）。</p>
+ * <p><b>"神似"而非考据</b>：关键色取近似值，一眼能认出风格即可，不抄字体与图标；名字走
+ * lang key（{@code gui.z_tweaks.theme.name.<id>}），不内联在 JSON 里。</p>
  */
-public record ZtTheme(Id id,
+public record ZtTheme(String id,
+                      // ---- 身份与本地化
+                      String nameKey, String shortNameKey, int order, boolean accentEditable,
                       // ---- 面板：底色 / 质感 / 圆角 / 描边
                       int panelTop, int panelBottom, Surface surface, int corner, int border,
                       // ---- 强调色（出厂值）与三级文字灰阶
@@ -25,39 +29,11 @@ public record ZtTheme(Id id,
                       // ---- 弹层 / 菜单
                       int menuBg, int menuBorder, int menuHover) {
 
-    /** 主题标识。取值同时是配置项的值（{@code defineEnum}）与 lang key 的后半段。 */
-    public enum Id {
-        DEFAULT("default"),
-        MD3("md3"),
-        AERO("aero"),
-        WIN_CLASSIC("win_classic");
-
-        private final String key;
-
-        Id(String key) {
-            this.key = key;
-        }
-
-        public String key() {
-            return key;
-        }
-
-        /** 配置里存的枚举名反查主题；认不出来一律回默认主题。 */
-        public static Id fromName(String name) {
-            for (Id value : values()) {
-                if (value.name().equals(name)) {
-                    return value;
-                }
-            }
-            return DEFAULT;
-        }
-    }
-
     /**
      * 面板质感。
      *
      * <p>只有三档，因为 1.20.1 的 GUI 画不出背景模糊：所谓"玻璃"只能靠半透明 + 高光描边 + 渐变
-     * 仿真（见 ADR-0007 第 1 条）。</p>
+     * 仿真（见 ADR-0008 第 4 条）。</p>
      */
     public enum Surface {
         /** 上浅下深的纵向渐变（默认主题的现有外观）。 */
@@ -129,6 +105,36 @@ public record ZtTheme(Id id,
     /** 行间分隔线 / 面板内分割线：比发丝线重一档，保证在纯色面板上也看得见。 */
     public int divider() {
         return withAlpha(luminance(panelTop) > 0.55f ? 0xFF000000 : 0xFFFFFFFF, 0x99);
+    }
+
+    /** 栏与栏之间的软分隔线：只用来"分栏"，比 {@link #divider()} 淡得多，不抢内容。 */
+    public int dividerSoft() {
+        return withAlpha(onLightPanel() ? 0xFF000000 : 0xFFFFFFFF, 0x33);
+    }
+
+    /**
+     * 面板内侧上沿的高光。
+     *
+     * <p>深色主题是很淡的一层白（模拟环境光），浅色主题（Win 经典）给真正的立体高光 ——
+     * 那一套的"银灰浮雕"全靠上亮下暗这一圈，只换底色是出不来的。</p>
+     */
+    public int panelHighlight() {
+        return onLightPanel() ? mix(panelTop, 0xFFFFFFFF, 0.60f) : withAlpha(0xFFFFFF, 0x14);
+    }
+
+    /** 面板内侧下沿的暗边，与 {@link #panelHighlight()} 配对，给平面板一点厚度。 */
+    public int panelShade() {
+        return onLightPanel() ? mix(panelBottom, 0xFF000000, 0.35f) : withAlpha(0x000000, 0x30);
+    }
+
+    /** 弹出层的上沿高光：底是 {@code menuBg}，不一定等于面板色，所以单独算一份。 */
+    public int menuHighlight() {
+        return onLightPanel() ? mix(menuBg, 0xFFFFFFFF, 0.55f) : withAlpha(0xFFFFFF, 0x18);
+    }
+
+    /** 弹出层的下沿暗边。 */
+    public int menuShade() {
+        return onLightPanel() ? mix(menuBg, 0xFF000000, 0.30f) : withAlpha(0x000000, 0x30);
     }
 
     /** 悬停时压在白底上的白：选中竖条、滚动条滑块这类"不跟主题走、只表示当前"的标记。 */
@@ -263,59 +269,50 @@ public record ZtTheme(Id id,
         return 0.2126f * r + 0.7152f * g + 0.0722f * b;
     }
 
-    // ------------------------------------------------------------------ 主题表
-    // 顺序即弹层里的顺序：从现代到复古。
-
-    /** 默认（TACZ 青）：就是抽取主题之前的现有外观，出厂强调色取 TACZ HUD 的 0x55FFFF。 */
-    private static final ZtTheme DEFAULT = new ZtTheme(Id.DEFAULT,
-            0xD2181C21, 0xD20C0E11, Surface.GRADIENT, 1, 0x38FFFFFF,
-            0xFF55FFFF, 0xFFE8E8E8, 0xFFA8AEB5, 0xFF6E7479,
-            0xFF5FD96A, 0xFFFF6E6E, 0xFF8A5A5A, 0x22FFFFFF, 0x33FFFFFF,
-            0xF0101010, 0x88FFFFFF, 0x20FFFFFF);
-
-    /** MD3 质感：中性深底 + 淡紫强调，圆角略大、动效感靠色阶层次做。 */
-    private static final ZtTheme MD3 = new ZtTheme(Id.MD3,
-            0xFF1F1D24, 0xFF141318, Surface.GRADIENT, 2, 0x30FFFFFF,
-            0xFFD0BCFF, 0xFFE6E1E5, 0xFFCAC4D0, 0xFF938F99,
-            0xFF7CD98A, 0xFFFF8A8A, 0xFFAF8A8A, 0x1FFFFFFF, 0x2FFFFFFF,
-            0xFF211F26, 0x55FFFFFF, 0x1FFFFFFF);
-
-    /** 千禧航空（Frutiger Aero）：天空蓝渐变 + 水绿强调 + 泛白高光，圆润。 */
-    private static final ZtTheme AERO = new ZtTheme(Id.AERO,
-            0xE62A7FB0, 0xE6164A6E, Surface.GLASS, 2, 0x99DFF6FF,
-            0xFF7FE3B0, 0xFFF2FBFF, 0xFFCDE9F5, 0xFF9FC4D4,
-            0xFF8BE07A, 0xFFFF9A8A, 0xFFC98A8A, 0x22EAF9FF, 0x33FFFFFF,
-            0xD92A6E96, 0x99E8FAFF, 0x33FFFFFF);
-
     /**
-     * Win 经典：银灰浮雕面板 + 标题栏藏青，直角、无渐变。
+     * 两套主题之间的调色板插值（切主题的 180ms 过渡用）。
      *
-     * <p>这一套的"不可用"用**Windows 错误图标的红**（{@code #E81123}）：银灰底上红褐太糊，
-     * 实机反馈是"看不出这个槽位不能用"。其余主题仍用各自的红褐色。</p>
+     * <p>身份字段取目标主题；质感与圆角在 t=0.5 处切换（与 chrome 的切换点一致）；
+     * 所有颜色按 ARGB 四通道插值，半透明面板不会在过渡中变成不透明。</p>
      */
-    private static final ZtTheme WIN_CLASSIC = new ZtTheme(Id.WIN_CLASSIC,
-            0xFFC0C0C0, 0xFFC0C0C0, Surface.SOLID, 0, 0xFF808080,
-            0xFF000080, 0xFF000000, 0xFF303030, 0xFF5A5A5A,
-            0xFF008000, 0xFF800000, 0xFFE81123, 0x22000000, 0x22000000,
-            0xFFC0C0C0, 0xFF808080, 0x22000000);
+    public static ZtTheme lerp(ZtTheme from, ZtTheme to, float t) {
+        float clamped = Math.max(0f, Math.min(1f, t));
+        boolean second = clamped >= 0.5f;
+        return new ZtTheme(to.id, to.nameKey, to.shortNameKey, to.order, to.accentEditable,
+                lerpArgb(from.panelTop, to.panelTop, clamped),
+                lerpArgb(from.panelBottom, to.panelBottom, clamped),
+                second ? to.surface : from.surface,
+                second ? to.corner : from.corner,
+                lerpArgb(from.border, to.border, clamped),
+                lerpArgb(from.accent, to.accent, clamped),
+                lerpArgb(from.text, to.text, clamped),
+                lerpArgb(from.textDim, to.textDim, clamped),
+                lerpArgb(from.textMuted, to.textMuted, clamped),
+                lerpArgb(from.good, to.good, clamped),
+                lerpArgb(from.bad, to.bad, clamped),
+                lerpArgb(from.blocked, to.blocked, clamped),
+                lerpArgb(from.hoverOverlay, to.hoverOverlay, clamped),
+                lerpArgb(from.controlBg, to.controlBg, clamped),
+                lerpArgb(from.menuBg, to.menuBg, clamped),
+                lerpArgb(from.menuBorder, to.menuBorder, clamped),
+                lerpArgb(from.menuHover, to.menuHover, clamped));
+    }
 
-    /** 按 id 取主题定义。 */
-    public static ZtTheme of(Id id) {
-        return switch (id) {
-            case DEFAULT -> DEFAULT;
-            case MD3 -> MD3;
-            case AERO -> AERO;
-            case WIN_CLASSIC -> WIN_CLASSIC;
-        };
+    static int lerpArgb(int from, int to, float t) {
+        int a = Math.round((from >>> 24) + ((to >>> 24) - (from >>> 24)) * t);
+        int r = Math.round((from >> 16 & 0xFF) + ((to >> 16 & 0xFF) - (from >> 16 & 0xFF)) * t);
+        int g = Math.round((from >> 8 & 0xFF) + ((to >> 8 & 0xFF) - (from >> 8 & 0xFF)) * t);
+        int b = Math.round((from & 0xFF) + ((to & 0xFF) - (from & 0xFF)) * t);
+        return a << 24 | r << 16 | g << 8 | b;
     }
 
     /** 主题名（lang key 中英各一份）。 */
     public Component displayName() {
-        return Component.translatable("gui.z_tweaks.theme.name." + id.key());
+        return Component.translatable(nameKey);
     }
 
     /** 弹层里按钮上的缩写：默认主题给"默认"，其余给一行短名。 */
     public Component shortName() {
-        return Component.translatable("gui.z_tweaks.theme.short." + id.key());
+        return Component.translatable(shortNameKey);
     }
 }

@@ -1,0 +1,45 @@
+{
+  "schema": 1,
+  "id": "md3",
+  "name_key": "gui.z_tweaks.theme.name.md3",
+  "short_name_key": "gui.z_tweaks.theme.short.md3",
+  "order": 1,
+  "accent_editable": false,
+  "surface": "gradient",
+  "corner": 2,
+  "palette": {
+    "panel_top": "#1F1D24FF",
+    "panel_bottom": "#141318FF",
+    "border": "#FFFFFF30",
+    "accent": "#D0BCFFFF",
+    "text": "#E6E1E5FF",
+    "text_dim": "#CAC4D0FF",
+    "text_muted": "#938F99FF",
+    "good": "#7CD98AFF",
+    "bad": "#FF8A8AFF",
+    "blocked": "#AF8A8AFF",
+    "hover_overlay": "#FFFFFF1F",
+    "control_bg": "#FFFFFF2F",
+    "menu_bg": "#211F26FF",
+    "menu_border": "#FFFFFF55",
+    "menu_hover": "#FFFFFF1F"
+  },
+  "metrics": {
+    "density": 1.04,
+    "detail_left_ratio": 0.38,
+    "info_font_scale": 0.78,
+    "panel_padding": 5,
+    "slot_gap": 6
+  },
+  "chrome": {
+    "frame": { "panel": "default", "popup": "default" },
+    "title_bar": { "style": "accent" },
+    "corners": { "style": "none" },
+    "pattern": { "style": "none", "alpha": 0.08 },
+    "selection": { "style": "fill" },
+    "button": { "style": "flat" }
+  },
+  "effects": {
+    "ambient": { "type": "spark", "density": 0.35, "speed": 0.8, "alpha": 0.22 }
+  }
+}

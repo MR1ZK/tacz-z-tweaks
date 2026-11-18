@@ -1,0 +1,45 @@
+{
+  "schema": 1,
+  "id": "default",
+  "name_key": "gui.z_tweaks.theme.name.default",
+  "short_name_key": "gui.z_tweaks.theme.short.default",
+  "order": 0,
+  "accent_editable": true,
+  "surface": "gradient",
+  "corner": 1,
+  "palette": {
+    "panel_top": "#181C21D2",
+    "panel_bottom": "#0C0E11D2",
+    "border": "#FFFFFF38",
+    "accent": "#55FFFFFF",
+    "text": "#E8E8E8FF",
+    "text_dim": "#A8AEB5FF",
+    "text_muted": "#6E7479FF",
+    "good": "#5FD96AFF",
+    "bad": "#FF6E6EFF",
+    "blocked": "#8A5A5AFF",
+    "hover_overlay": "#FFFFFF22",
+    "control_bg": "#FFFFFF33",
+    "menu_bg": "#101010F0",
+    "menu_border": "#FFFFFF88",
+    "menu_hover": "#FFFFFF20"
+  },
+  "metrics": {
+    "density": 1.0,
+    "detail_left_ratio": 0.40,
+    "info_font_scale": 0.80,
+    "panel_padding": 6,
+    "slot_gap": 6
+  },
+  "chrome": {
+    "frame": { "panel": "default", "popup": "default" },
+    "title_bar": { "style": "accent" },
+    "corners": { "style": "none" },
+    "pattern": { "style": "none", "alpha": 0.08 },
+    "selection": { "style": "bar" },
+    "button": { "style": "default" }
+  },
+  "effects": {
+    "ambient": { "type": "none" }
+  }
+}

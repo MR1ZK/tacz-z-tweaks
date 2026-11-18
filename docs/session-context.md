@@ -1,6 +1,8 @@
 # 会话上下文摘要
 
-> 2026-10-10 更新，覆盖到 **v0.3.3-hotfix1**（Latest）。0.1.3 之后又走完四轮：① 与 TACZ Addon「随意配件」的对接修复；② **界面主题**（四套：默认（TACZ 青）/ MD3 质感 / 千禧航空 / Win 经典，默认主题可调强调色，见 ADR-0007 与 `CONTEXT.md` 的「主题」「强调色」）；③ **全盘 review（标准 / 规格双轴）及其修复**（按钮三态色与暗角 / HUD 底衬进主题、术语改名、详情条几何合一等）；④ 三条基线味道重构（详情条列几何、`SlotBar` 具名记录、排序键包成 `SortKey`；4/5 与 5/5 经确认不做）。其间还按实机反馈重排了底栏与信息框（名字移到方块下方、底栏不压信息框、浅色主题文字改走黑墨、不可用槽位改红）。面向下一个接手的人（人或 agent）：读完这份文档应该能接着干活，不用翻对话记录。
+> 2026-10-10 更新，覆盖到 **v0.3.3-hotfix1**（Latest）。0.1.3 之后又走完四轮：① 与 TACZ Addon「随意配件」的对接修复；② **界面主题**（四套：默认（TACZ 青）/ MD3 质感 / 千禧航空 / Win 经典，默认主题可调强调色，见 ADR-0007 与 `CONTEXT.md` 的「主题」「强调色」）；③ **全盘 review（标准 / 规格双轴）及其修复**（按钮三态色与暗角 / HUD 底衬进主题、术语改名、详情条几何合一等）；④ 三条基线味道重构（详情条列几何、`SlotBar` 具名记录、排序键包成 `SortKey`；4/5 与 5/5 经确认不做）。其间还按实机反馈重排了底栏与信息框（名字移到方块下方、底栏不压信息框、浅色主题文字改走黑墨、不可用槽位改红）。面向下一个接手的人（人或 agent）：读完这份文档应该能接着干活，不用翻对话记录。（**2026-10-18 补**：剩下的功能待办已统一标记为「暂时不做」，见「已知问题 / 待办」抬头。同日另做了一轮**主题材质打磨**：面板内侧高光 / 暗边与玻璃高光带、按钮受光面、弹层投影、候选行与当前槽位的强调色渐变、详情条与概览卡的分栏引导线 —— 只动绘制，不碰布局与命中，口径仍在 ADR-0007 的"颜色 + 质感"内。）
+
+> **2026-11-18：主题系统 v2 开工**（[ADR-0008](adr/0008-theme-system-v2.md) 取代 ADR-0007 的第 1、2、5 条）。阶段 0–4 已落地：主题改成 `assets/z_tweaks/themes/*.json`、`ThemeRegistry` 懒加载（资源包可覆盖/新增）、配置 `theme` 从枚举名改为字符串 id 并自动映射旧值；`RefitLayout` 快照接管全部静态几何，五个受控参数已消费；`ThemeChrome` 装饰层已进 JSON 并生效，配置屏也换上了主题底与外框；氛围动效（`spark` / `flow` / `bokeh`）进 JSON，配置 `motion` 分 `FULL` / `REDUCED` / `OFF`，低于 45 FPS 持续 3 秒自动关粒子。**默认主题与 Win 经典不动效，MD3 与千禧航空开始有粒子层**。切主题的 180ms 过渡也已落地（调色板逐色插值、0.5 处换 chrome/effect、正弦压暗遮硬切；命中从第一帧就用最终几何）。下一阶段是纹理 atlas 与旗舰主题重做。
 
 ## 项目一句话
 
@@ -17,6 +19,7 @@
 
 - 需要 `libs/tacz-1.20.1-1.1.8-hotfix.jar`（TACZ 本体，不入库）
 - `./gradlew build` / `./gradlew runClient`
+- Windows 实机验证：`verify-client.bat`（构建 + `runClient`，关掉游戏后自动扫 `run/logs/latest.log` 里的 `at com.ztweaks`；`--check` 只查依赖，`--skip-build` 跳过构建）
 - 提交用 `git -c user.name=MR1ZK -c user.email=...noreply.github.com`（**仓库没配 git 身份**，别改全局 config）
 - 发布流程（v0.1.3 与 v0.1.3-hotfix1 实走的同一条）：改 `gradle.properties` 的 `mod_version` → `./gradlew build` → commit + `git push origin main` → `git tag v0.x.y` + `git push origin v0.x.y` → `gh release create v0.x.y --title "Z-Tweaks 0.x.y" --notes-file <文件> build/libs/<jar>`（说明照上一版格式写）。**tag 里的 hotfix 带连字符**：`mod_version=0.1.3hotfix1` 对应的 tag 是 `v0.1.3-hotfix1`（沿用 v0.1.1-hotfix1）。复用版本号时才需要 `git tag -f` 强移 + `--clobber`；**说明必须走 `--notes-file`** —— PowerShell 下多行 `--notes` 会被拆成多个参数
 
@@ -27,6 +30,7 @@
   - `FirstPersonRenderGunEventMixin` —— 轨道相机，注入 `applyFirstPersonPositioningTransform` 的 RETURN
   - `GunItemRendererWrapperMixin` —— 悬停虚拟装配，`@ModifyVariable` 换入口的 gun stack
 - 核心文件：`ZtRefitScreen.java`（~2500 行，界面全部在这里）；`OrbitCamera` / `VirtualAssembly` 是状态单例；`StatCatalog` 是"可排序参数"的目录与取值口；预设的落盘与分享码在 `com.ztweaks.preset.PresetStore`（界面里只留交互与干跑）
+- **主题数据层（ADR-0008，进行中）**：内置主题在 `assets/z_tweaks/themes/*.json`，`ThemeRegistry` 懒加载、资源包可覆盖/新增；配置 `theme` 存字符串 id（旧枚举名 `DEFAULT`/`MD3`/`AERO`/`WIN_CLASSIC` 自动映射）。布局来自 `RefitLayout` 快照，装饰来自 `ThemeChrome`（六个部件，程序化样式，贴图 atlas 尚未接），动效来自 `ThemeEffect` + `AmbientEffects`（背景/前景两层、固定粒子池、45 FPS 自动降级）；切主题过渡在 `ZtRefitScreen` 内（`ZtTheme.lerp` + 压暗遮罩）
 - 几何原则：**绘制与命中检测共用同一个 rect 来源**（`listRect` / `rowRect` / `slotRect` / `attachColumnRect`），改一处不会飘
 - 文案原则：枪的参数全部复用 TACZ 自己的 lang key（`tooltip.tacz.gun.*`）和 `AttachmentDataUtils` 离线计算，中英与原生 tooltip 对齐
 - 性能注意：`AttachmentDataUtils` 每次调用都全量重算，**必须缓存**（枪械参数卡按枪 id+NBT 缓存）
@@ -57,9 +61,13 @@
 
 ## 已知问题 / 待办
 
-- **地图归档 ≠ 功能做完**：仓库没有打开的 issue，**#6/#7/#8/#9/#10 已落进代码**；还留在纸上的只剩**收藏（#5）与会话内位置记忆**——`CONTEXT.md` 有「收藏」词条、ADR-0005 给它留了 `favorites.json`，但一颗星都没画（两个入口、排序里插在"已拥有"之后、只看收藏开关、按 枪 id + 槽位类型 记的滚动与选中项）。
+> **2026-10-18：本节剩下的功能项统一标记为「暂时不做」** —— 收藏（#5）、会话内位置记忆、配置屏「恢复默认」按钮，以及 Liberate 与预设的对接口径。下面保留原文只为交代"当时想做什么、卡在哪"，**不是待开工清单**；要重启其中任何一项，先把对应的条目改回开放再动手。
+
+
+
+- **暂时不做 —— 收藏（#5）与会话内位置记忆**：仓库没有打开的 issue，**#6/#7/#8/#9/#10 已落进代码**；这两项一直留在纸上：`CONTEXT.md` 有「收藏」词条、ADR-0005 给它留了 `favorites.json`，但一颗星都没画（两个入口、排序里插在"已拥有"之后、只看收藏开关、按 枪 id + 槽位类型 记的滚动与选中项）。
 - **#7 的宽度表是概览态卡的三列几何（`usable/3.5`），槽位模式下的变化列是另一套**：详情条右侧现在三等分（Pros / Cons / 变化列），480×270 下每段约 93px。变化列那条"最多 5 行、要滚"的约束因此更紧，`drawParamChanges` 里做了裁剪与滚动。
-- **TACZ Addon 的「随意配件」（Liberate）**（[issue #18](https://github.com/MR1ZK/tacz-z-tweaks/issues/18)）：已做**软依赖对接** —— `client/LiberateBridge` 反射 3 个符号（`LiberateAttachment.isLiberated`、`LiberateAttachmentInstallPacket(int, ResourceLocation)`、`init.NetworkHandler.CHANNEL`），生效时改发它自己的包（只带枪槽位 + 配件 id），拿不到句柄就降级并在进界面时提示一次。**口径已按实机结果定下**：随意配件**只放开拥有性**（生存模式也全列、一律按可用呈现、可直接装），**白名单照旧过滤**（不在白名单里的配件不出现）；所以生效时不存在"不可安装"那一组、也用不上那道护栏。口径写进 `CONTEXT.md` 的「随意配件」词条。**仍开放**：预设应用还按"背包里有没有实物"算缺件，要不要让预设也走 Liberate 通道未定。
+- **TACZ Addon 的「随意配件」（Liberate）**（[issue #18](https://github.com/MR1ZK/tacz-z-tweaks/issues/18)）：已做**软依赖对接** —— `client/LiberateBridge` 反射 3 个符号（`LiberateAttachment.isLiberated`、`LiberateAttachmentInstallPacket(int, ResourceLocation)`、`init.NetworkHandler.CHANNEL`），生效时改发它自己的包（只带枪槽位 + 配件 id），拿不到句柄就降级并在进界面时提示一次。**口径已按实机结果定下**：随意配件**只放开拥有性**（生存模式也全列、一律按可用呈现、可直接装），**白名单照旧过滤**（不在白名单里的配件不出现）；所以生效时不存在"不可安装"那一组、也用不上那道护栏。口径写进 `CONTEXT.md` 的「随意配件」词条。**暂时不做**：预设应用仍按"背包里有没有实物"算缺件，让不让预设也走 Liberate 通道留作将来再议。
 - **2026-09-28 全盘 review（双轴：标准 / 规格）**：结论与逐条发现见当轮对话；已修的部分是「按钮三态色入主题」「`Compat`→`AllowState`/`allow`」「en_us 去掉被禁措辞」「暗角与 HUD 底衬进主题」「ADR-0007 第 5 条与注释改成与实现一致的措辞」。**还没修**：详情条几何四处各算一份（`drawDetail` / `deltaColumnRect` / `attachColumnRect` / `drawGunInfo`）、`PresetStore` 同步写盘（与 ADR-0005 §4 的"标脏 + 合批"相抵）、以及一批基线味道（三套弹层骨架重复、`sortKey` 用 int 编码、`int[] slotBarGeometry` 无名对等）。
 - **记账（2026-09-28 收尾）**：上面那条"还没修"里的**详情条几何已经修了** —— `detailLeft` / `detailWidth` / `detailLeftWidth` / `detailColumnWidth` / `detailColumnLeft` 成为唯一来源，`drawDetail`、变化列绘制、`deltaColumnRect`、`attachColumnRect`、`detailRect` 全部从它取（commit `863552d`）；`PresetStore` 同步写盘**按建议保持不改**；基线味道（三套弹层骨架重复、"克隆枪 + install + eval"四处、`sortKey` 用 int 编码、`int[] slotBarGeometry` 无名对、`selectedStat()` 纯转发）**仍开放**，不是违规、要不要收由你定。
 - ~~**基线味道 4/5「三套弹层骨架合一」**~~ **经确认不做**（2026-09-28）。下面这段只作为"为什么当时判定它风险高"的记录保留，**不要照它开工**。
@@ -74,7 +82,7 @@
 - ~~`computeProsCons()` 每帧无缓存地跑（`AttachmentCacheProperty.eval` ×2）~~ —— 已随 #9 的缓存入口还掉：现在只有"枪 + NBT + 预览件"三者之一变化时才重算
 - 配置屏输入框改数值不会把滑块拖回（输入中间态会乱跳，故意不同步）
 - ~~闲置卡片第三列预留了但没放数据~~ —— 第二列现在是全量参数（含 `docs/research/client-gun-params.md` 定的那六项，顺序照它）、第三列是变化项（#7/#8 已落地）。后坐力仍**不该进**（样条曲线，非标量）
-- 配置屏没有"恢复默认"按钮
+- **暂时不做** —— 配置屏没有"恢复默认"按钮
 - TACZ 经验等级百分比有个 int 整除 bug（非满级恒显 0.0%），我们的卡片已绕开；如果改回对齐原生行为要注意
 - **参数排序与筛选已实跑验证**（弹层绘制与命中、方向语义、改排序当场重建）。
 - 记一个约束：弹层内容有 `170px`，而它可用的垂直空间只有 `GUI 高 − 150` —— 所以 **GUI 高度不足 320 时它会滚动**（不只是裁掉）。将来加排序项或调行高，它会继续变长，别假设一屏放得下

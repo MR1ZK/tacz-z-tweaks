@@ -11,6 +11,16 @@
 | `orbit_camera` | `true` | 轨道相机总开关，硬关：关掉后 `V` 键也开不回来 |
 | `virtual_assembly` | `true` | 悬停虚拟装配总开关，硬关：关掉后预览始终是手上的真枪 |
 
+## `look` 段
+
+| 项 | 默认 | 说明 |
+|---|---|---|
+| `theme` | `default` | 主题 id。内置 `default` / `md3` / `aero` / `win_classic`；资源包可在 `assets/<命名空间>/themes/<id>.json` 下覆盖或新增，认不出的 id 回落 `default` |
+| `accent_rgb` | `0x55FFFF` | 默认主题的强调色（`0xRRGGBB`）。只对 `accent_editable` 为 true 的主题生效 |
+| `motion` | `FULL` | 动效档位：`FULL` 过渡 + 粒子/流光 / `REDUCED` 去粒子、保留短过渡 / `OFF` 全部即时。帧率低于 45 持续 3 秒会在本次界面自动关粒子（只降不升） |
+
+主题文件的结构与限制见 [ADR-0008](adr/0008-theme-system-v2.md)：四段 `palette` / `metrics` / `chrome` / `effects`，一层 `extends`，布局参数只开放五个。
+
 ## `debug` 段
 
 调界面时用的，默认全关，正常游玩不用动。

@@ -1,0 +1,45 @@
+{
+  "schema": 1,
+  "id": "aero",
+  "name_key": "gui.z_tweaks.theme.name.aero",
+  "short_name_key": "gui.z_tweaks.theme.short.aero",
+  "order": 2,
+  "accent_editable": false,
+  "surface": "glass",
+  "corner": 2,
+  "palette": {
+    "panel_top": "#2A7FB0E6",
+    "panel_bottom": "#164A6EE6",
+    "border": "#DFF6FF99",
+    "accent": "#7FE3B0FF",
+    "text": "#F2FBFFFF",
+    "text_dim": "#CDE9F5FF",
+    "text_muted": "#9FC4D4FF",
+    "good": "#8BE07AFF",
+    "bad": "#FF9A8AFF",
+    "blocked": "#C98A8AFF",
+    "hover_overlay": "#EAF9FF22",
+    "control_bg": "#FFFFFF33",
+    "menu_bg": "#2A6E96D9",
+    "menu_border": "#E8FAFF99",
+    "menu_hover": "#FFFFFF33"
+  },
+  "metrics": {
+    "density": 1.0,
+    "detail_left_ratio": 0.42,
+    "info_font_scale": 0.80,
+    "panel_padding": 7,
+    "slot_gap": 8
+  },
+  "chrome": {
+    "frame": { "panel": "double", "popup": "double" },
+    "title_bar": { "style": "banner" },
+    "corners": { "style": "brackets" },
+    "pattern": { "style": "scanline", "alpha": 0.06 },
+    "selection": { "style": "glow" },
+    "button": { "style": "bevel" }
+  },
+  "effects": {
+    "ambient": { "type": "flow", "density": 0.55, "speed": 1.0, "alpha": 0.30 }
+  }
+}

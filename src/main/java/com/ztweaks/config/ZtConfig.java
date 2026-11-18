@@ -1,6 +1,5 @@
 package com.ztweaks.config;
 
-import com.ztweaks.client.ZtTheme;
 import net.minecraftforge.common.ForgeConfigSpec;
 
 /**
@@ -17,6 +16,16 @@ public final class ZtConfig {
         DELTA,
         /** 直接复用 TACZ 为配件预拼好的文本（JsonProperty.getComponents）。 */
         TACZ_TEXT
+    }
+
+    /** 界面动效档位（见 ADR-0008 第 5 条）。 */
+    public enum Motion {
+        /** 过渡 + 粒子/流光。 */
+        FULL,
+        /** 去掉粒子/流光，保留短过渡。 */
+        REDUCED,
+        /** 全部即时。 */
+        OFF
     }
 
     /** 轨道相机枢轴的取法。 */
@@ -39,13 +48,18 @@ public final class ZtConfig {
     public static final ForgeConfigSpec.BooleanValue VIRTUAL_ASSEMBLY;
 
     // ------------------------------------------------------------------ look
-    /** 界面主题（见 ADR-0007）。两个入口读写同一项：改装界面左上角的按钮、配置屏那一行。 */
-    public static final ForgeConfigSpec.EnumValue<ZtTheme.Id> THEME;
+    /**
+     * 界面主题 id（见 ADR-0008）。两个入口读写同一项：改装界面左上角的按钮、配置屏那一行。
+     * 存字符串而不是枚举：资源包可以新增主题，枚举装不下。旧配置里的枚举名会在读取时映射到新 id。
+     */
+    public static final ForgeConfigSpec.ConfigValue<String> THEME;
     /**
      * 默认主题的自定义强调色（0xRRGGBB）。**只对默认主题生效** —— 其余主题的强调色是它调性的
      * 组成部分，随手改会立刻变味。压在强调色上的文字按亮度自动切黑 / 白，所以纯黑也看得清。
      */
     public static final ForgeConfigSpec.IntValue THEME_ACCENT;
+    /** 动效档位：FULL / REDUCED / OFF。运行时自动降级只影响本次界面，不改这个值。 */
+    public static final ForgeConfigSpec.EnumValue<Motion> MOTION;
 
     // ------------------------------------------------------------------ debug
     /** 左上角诊断 HUD：mixin 命中数、相机读数、枢轴读数、取景进度、字体测试。 */
@@ -91,16 +105,22 @@ public final class ZtConfig {
                 .define("virtual_assembly", true);
         builder.pop();
 
-        builder.comment("界面外观（见 docs/adr/0007-ui-theme-system.md）").push("look");
+        builder.comment("界面外观（见 docs/adr/0008-theme-system-v2.md）").push("look");
         THEME = builder
-                .comment("界面主题",
-                        "DEFAULT = 默认（TACZ 青，可调强调色）",
-                        "MD3 / AERO / WIN_CLASSIC = 另外三套预设")
-                .defineEnum("theme", ZtTheme.Id.DEFAULT);
+                .comment("界面主题 id",
+                        "内置：default（TACZ 青，可调强调色）/ md3 / aero / win_classic",
+                        "资源包可在 assets/<命名空间>/themes/<id>.json 下覆盖或新增主题")
+                .define("theme", "default");
         THEME_ACCENT = builder
                 .comment("默认主题的自定义强调色（0xRRGGBB，默认取 TACZ HUD 的 0x55FFFF）",
                         "只对默认主题生效；压在强调色上的文字会按亮度自动切黑 / 白")
                 .defineInRange("accent_rgb", 0x55FFFF, 0x000000, 0xFFFFFF);
+        MOTION = builder
+                .comment("界面动效档位",
+                        "FULL = 过渡 + 粒子/流光（默认）",
+                        "REDUCED = 去掉粒子/流光，保留短过渡",
+                        "OFF = 全部即时")
+                .defineEnum("motion", Motion.FULL);
         builder.pop();
 
         builder.comment("原型期的调参与诊断探针：布尔项默认关闭，数值项默认取代码里的原值").push("debug");
