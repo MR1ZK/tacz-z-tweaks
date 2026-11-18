@@ -60,6 +60,8 @@ public final class ZtConfig {
     public static final ForgeConfigSpec.IntValue THEME_ACCENT;
     /** 动效档位：FULL / REDUCED / OFF。运行时自动降级只影响本次界面，不改这个值。 */
     public static final ForgeConfigSpec.EnumValue<Motion> MOTION;
+    /** 玻璃主题的背景模糊；关掉后玻璃面板退回半透明底色。 */
+    public static final ForgeConfigSpec.BooleanValue BLUR;
 
     // ------------------------------------------------------------------ debug
     /** 左上角诊断 HUD：mixin 命中数、相机读数、枢轴读数、取景进度、字体测试。 */
@@ -121,6 +123,11 @@ public final class ZtConfig {
                         "REDUCED = 去掉粒子/流光，保留短过渡",
                         "OFF = 全部即时")
                 .defineEnum("motion", Motion.FULL);
+        BLUR = builder
+                .comment("玻璃主题的毛玻璃背景模糊（千禧航空）",
+                        "true = 面板下方采样并模糊当前帧背景（每 8 帧更新一次）",
+                        "false = 退回半透明底色，不采样帧缓冲")
+                .define("blur", true);
         builder.pop();
 
         builder.comment("原型期的调参与诊断探针：布尔项默认关闭，数值项默认取代码里的原值").push("debug");

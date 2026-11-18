@@ -1,8 +1,10 @@
 package com.ztweaks.client;
 
+import com.mojang.blaze3d.systems.RenderSystem;
 import com.ztweaks.config.ZtConfig;
 import net.minecraft.client.gui.Font;
 import net.minecraft.client.gui.GuiGraphics;
+import net.minecraft.resources.ResourceLocation;
 
 /**
  * 自绘界面的调色板与绘制原语。
@@ -103,6 +105,15 @@ public final class ZtUi {
     private static ThemeMetrics metrics = ThemeMetrics.DEFAULT;
     private static ThemeChrome activeChrome = ThemeChrome.DEFAULT;
     private static ThemeEffect activeEffect = ThemeEffect.NONE;
+    private static ThemeBlur activeBlur = ThemeBlur.DISABLED;
+
+    /** 当前帧的模糊纹理（由 ScreenBlur 每 N 帧更新；未就绪时 panel 走原来的半透明底）。 */
+    private static ResourceLocation blurTexture;
+    private static int blurTexW;
+    private static int blurTexH;
+    private static int blurScreenW;
+    private static int blurScreenH;
+    private static boolean blurReady;
 
     /** 当前主题（按钮显示、弹层打勾用）。 */
     public static ZtTheme theme() {
@@ -122,6 +133,30 @@ public final class ZtUi {
     /** 当前主题的氛围动效定义（是否播放由动效档位与自动降级决定）。 */
     public static ThemeEffect effect() {
         return activeEffect;
+    }
+
+    /** 当前主题的毛玻璃定义；是否真正启用还要看配置与帧率降级。 */
+    public static ThemeBlur blur() {
+        return activeBlur;
+    }
+
+    /** ScreenBlur 每 N 帧写入一张新的模糊纹理；面板绘制时按屏幕坐标取样。 */
+    public static void setBlur(ResourceLocation texture, int texW, int texH, int screenW, int screenH) {
+        blurTexture = texture;
+        blurTexW = texW;
+        blurTexH = texH;
+        blurScreenW = screenW;
+        blurScreenH = screenH;
+        blurReady = texture != null && texW > 0 && texH > 0 && screenW > 0 && screenH > 0;
+    }
+
+    public static void clearBlur() {
+        blurReady = false;
+    }
+
+    /** 切主题过渡到中点时换主题的模糊声明（调色板仍在插值，不能走 refresh）。 */
+    public static void setBlurSpec(ThemeBlur value) {
+        activeBlur = value;
     }
 
     // 过渡期的受控写入点：切主题时按 0.5 的切换点换 chrome / effect / metrics，
@@ -158,6 +193,7 @@ public final class ZtUi {
         metrics = spec.metrics();
         activeChrome = spec.chrome();
         activeEffect = spec.effect();
+        activeBlur = spec.blur();
         // 强调色只对声明了 accent_editable 的主题生效（目前只有默认主题，见 ADR-0008）
         int override = theme.accentEditable() ? ZtConfig.THEME_ACCENT.get() : -1;
         apply(theme, override);
@@ -288,19 +324,30 @@ public final class ZtUi {
      * 全部是画在底色之上的像素，不碰布局、不碰命中。</p>
      */
     public static void panel(GuiGraphics graphics, int x, int y, int w, int h) {
+        boolean glassBlur = SURFACE == ZtTheme.Surface.GLASS && blurReady;
+        if (SURFACE == ZtTheme.Surface.GLASS) {
+            shadow(graphics, x, y, w, h);
+        }
+        if (glassBlur) {
+            blurBackdrop(graphics, x, y, w, h);
+        }
         if (SURFACE == ZtTheme.Surface.SOLID || PANEL_TOP == PANEL_BOTTOM) {
             roundedFill(graphics, x, y, w, h, PANEL_TOP);
+        } else if (glassBlur) {
+            // 有模糊底时压薄主题色，让背景透出来；0x8C 是"能看见糊、但字仍清楚"的折中
+            roundedFillGradient(graphics, x, y, w, h,
+                    ZtTheme.withAlpha(PANEL_TOP, 0x8C), ZtTheme.withAlpha(PANEL_BOTTOM, 0x8C));
         } else {
             // 渐变面板也按主题圆角切角：九宫格外框的圆角要能对得上，不然角上会露出方形底色
             roundedFillGradient(graphics, x, y, w, h, PANEL_TOP, PANEL_BOTTOM);
         }
         int r = Math.max(0, Math.min(CORNER, Math.min(w, h) / 2));
         if (SURFACE == ZtTheme.Surface.GLASS) {
-            // 顶部一条渐隐高光带：1.20.1 没有背景模糊，"玻璃感"只能靠这层反光骗眼睛。
+            // 顶部一条渐隐高光带：模糊层之上再加一层反光，玻璃才有厚度
             // 高度封顶 28px —— 面板一高就整片泛白，白字会先糊掉。
             int band = Math.min(28, Math.max(4, h / 3));
             graphics.fillGradient(x + 1, y + 1, x + w - 1, y + band,
-                    ZtTheme.withAlpha(0xFFFFFF, 0x1A), ZtTheme.withAlpha(0xFFFFFF, 0x00));
+                    ZtTheme.withAlpha(0xFFFFFF, 0x26), ZtTheme.withAlpha(0xFFFFFF, 0x00));
         }
         int inset = 1 + r;
         graphics.fill(x + inset, y + 1, x + w - inset, y + 2, PANEL_HIGHLIGHT);
@@ -313,6 +360,24 @@ public final class ZtUi {
         frame(graphics, x, y, w, h, activeChrome.frame().panel(), activeChrome.frame().panelSlice(),
                 HAIRLINE, PANEL_HIGHLIGHT, PANEL_SHADE);
         corners(graphics, x, y, w, h);
+    }
+
+    /**
+     * 把屏幕空间的小尺寸模糊纹理按面板矩形取样，铺成玻璃底。
+     *
+     * <p>模糊纹理由 {@code ScreenBlur} 每 N 帧从主帧缓冲降采样一次；这里只做“从大图里抠一块”
+     * 的 UV 映射，不重复模糊。{@code blit} 的 u/v 是纹理像素，uWidth/vHeight 才是取样尺寸。</p>
+     */
+    private static void blurBackdrop(GuiGraphics graphics, int x, int y, int w, int h) {
+        float u = x * (float) blurTexW / blurScreenW;
+        float v = y * (float) blurTexH / blurScreenH;
+        float uw = w * (float) blurTexW / blurScreenW;
+        float vh = h * (float) blurTexH / blurScreenH;
+        RenderSystem.enableBlend();
+        RenderSystem.defaultBlendFunc();
+        RenderSystem.setShaderColor(1f, 1f, 1f, 1f);
+        graphics.blit(blurTexture, x, y, w, h, u, v,
+                Math.max(1, Math.round(uw)), Math.max(1, Math.round(vh)), blurTexW, blurTexH);
     }
 
     /**

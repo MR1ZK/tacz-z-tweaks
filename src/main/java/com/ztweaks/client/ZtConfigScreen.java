@@ -63,6 +63,7 @@ public final class ZtConfigScreen extends Screen {
         addHeader("group.look");
         addTheme();
         addEnum("motion", ZtConfig.MOTION, ZtConfig.Motion.values());
+        addBool("blur", ZtConfig.BLUR);
 
         addHeader("group.debug");
         addBool("hud", ZtConfig.DEBUG_HUD);

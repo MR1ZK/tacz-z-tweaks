@@ -231,6 +231,8 @@ public class ZtRefitScreen extends GunRefitScreen {
 
     /** 氛围动效的粒子池（背景层 + 前景层）。 */
     private final AmbientEffects ambientEffects = new AmbientEffects();
+    /** 屏幕空间毛玻璃：每 8 帧从主帧缓冲降采样一次。 */
+    private final ScreenBlur screenBlur = new ScreenBlur();
     private long fpsWindowNanos;
     private int fpsFrames;
     private int lowFpsSeconds;
@@ -1112,6 +1114,9 @@ public class ZtRefitScreen extends GunRefitScreen {
     public void render(GuiGraphics graphics, int mouseX, int mouseY, float partialTick) {
         updateThemeTransition();
         super.render(graphics, mouseX, mouseY, partialTick);
+        // 先抓这一帧的世界/枪画面，再画面板；面板里的玻璃底才有东西可模糊
+        trackMotionBudget();
+        updateScreenBlur();
         rebuildCandidates();
         refreshPreview();
         // 装了 TACZ Addon 但桥接不上：那条规则下的装件是**静默**失败的（服务端不回声，客户端却会响会弹条），
@@ -1127,7 +1132,6 @@ public class ZtRefitScreen extends GunRefitScreen {
         // 枪本体是 3D 世界里的渲染，压一层极淡的上下暗角把界面压出层次，同时不遮挡枪
         drawVignette(graphics);
         // 氛围粒子：背景层在 3D 与面板之间，前景层画完详情条后再补（见下）
-        trackMotionBudget();
         ambientEffects.update(activeEffect(), this.width, this.height, effectForegroundArea());
         ambientEffects.renderBackground(graphics);
         drawSlotBar(graphics, mouseX, mouseY);
@@ -1280,6 +1284,22 @@ public class ZtRefitScreen extends GunRefitScreen {
         }
     }
 
+    /** 屏幕空间毛玻璃的开关：主题声明 + 配置 + 帧率降级 + 必须是 GLASS 表面。 */
+    private void updateScreenBlur() {
+        ThemeBlur blur = ZtUi.blur();
+        boolean enabled = blur.enabled()
+                && ZtConfig.BLUR.get()
+                && !motionDegraded
+                && ZtUi.theme().surface() == ZtTheme.Surface.GLASS;
+        screenBlur.update(getMinecraft(), this.width, this.height, blur.strength(), enabled);
+    }
+
+    @Override
+    public void removed() {
+        screenBlur.close();
+        super.removed();
+    }
+
     /** 当前应该播放的氛围动效：配置档位与自动降级都在这道闸门里。 */
     private ThemeEffect activeEffect() {
         if (motionDegraded) {
@@ -1360,6 +1380,7 @@ public class ZtRefitScreen extends GunRefitScreen {
             ThemeSpec target = ThemeRegistry.resolve(transitionTo.id());
             ZtUi.setChrome(target.chrome());
             ZtUi.setEffect(target.effect());
+            ZtUi.setBlurSpec(target.blur());
             transitionChromeSwapped = true;
         }
         if (t >= 1f) {

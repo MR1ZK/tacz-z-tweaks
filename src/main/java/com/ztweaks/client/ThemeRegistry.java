@@ -305,9 +305,11 @@ public final class ThemeRegistry {
                 Math.max(4, Math.min(8, integer(metrics, "panel_padding", defaults.panelPadding()))),
                 Math.max(2, Math.min(6, integer(metrics, "slot_gap", defaults.slotGap()))));
 
+        JsonObject effects = obj(object, "effects");
         return new ThemeSpec(theme, parsedMetrics,
                 parseChrome(obj(object, "chrome")),
-                parseEffect(obj(object, "effects"), accent));
+                parseEffect(effects, accent),
+                parseBlur(obj(effects, "blur")));
     }
 
     private static ThemeChrome parseChrome(JsonObject object) {
@@ -428,6 +430,13 @@ public final class ThemeRegistry {
         return new ThemeEffect(type, color, density, speed, alpha);
     }
 
+    private static ThemeBlur parseBlur(JsonObject object) {
+        if (!bool(object, "enabled", false)) {
+            return ThemeBlur.DISABLED;
+        }
+        return new ThemeBlur(true, clamp(flt(object, "strength", 0.55f), 0.1f, 1f));
+    }
+
     private static void installFallback(String reason) {
         LOGGER.info("Using built-in default theme ({})", reason);
         SPECS.clear();
@@ -447,7 +456,8 @@ public final class ThemeRegistry {
                     0xFF55FFFF, 0xFFE8E8E8, 0xFFA8AEB5, 0xFF6E7479,
                     0xFF5FD96A, 0xFFFF6E6E, 0xFF8A5A5A, 0x22FFFFFF, 0x33FFFFFF,
                     0xF0101010, 0x88FFFFFF, 0x20FFFFFF);
-            fallback = new ThemeSpec(theme, ThemeMetrics.DEFAULT, ThemeChrome.DEFAULT, ThemeEffect.NONE);
+            fallback = new ThemeSpec(theme, ThemeMetrics.DEFAULT, ThemeChrome.DEFAULT,
+                    ThemeEffect.NONE, ThemeBlur.DISABLED);
         }
         return fallback;
     }
