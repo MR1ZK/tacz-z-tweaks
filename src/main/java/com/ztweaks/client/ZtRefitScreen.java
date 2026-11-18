@@ -91,10 +91,11 @@ public class ZtRefitScreen extends GunRefitScreen {
      * 上下边框各自留一点白，方块与文字都不许越界（用户实机反馈：原先名字画在方块上方，
      * 连面板一起顶进了上面的详情条）。
      */
-    private static final int SLOT_PAD_TOP = 2;
+    /** 上下留白要容得下九宫格外框（4px），否则槽位方块会压到边框上 */
+    private static final int SLOT_PAD_TOP = 5;
     private static final int SLOT_LABEL_H = 11;
     /** 名字下方多留一点：否则面板下边框会贴到字脚，低分辨率下像被裁掉 */
-    private static final int SLOT_PAD_BOTTOM = 4;
+    private static final int SLOT_PAD_BOTTOM = 5;
     /** 候选面板宽度与内部两栏高度：绘制与命中检测共用 {@link #listRect()}，不再各写一份。 */
     private static final int LIST_W = 190;
     private static final int LIST_HEADER = 15;
@@ -3617,7 +3618,7 @@ public class ZtRefitScreen extends GunRefitScreen {
         List<List<Component>> columns = List.of(infoMain, infoStats, infoExtra);
         infoColumnLines = new int[INFO_COLUMNS];
         // 三列之间的软引导线：画在屏幕空间（不跟 0.8 缩放），只分栏不抢字
-        int guideTop = y + 4;
+        int guideTop = y + 5;
         int guideBottom = y + layout().detail().h() - 5;
         float boundary = x + 6;
         for (int c = 0; c < INFO_COLUMNS - 1; c++) {
@@ -3627,7 +3628,7 @@ public class ZtRefitScreen extends GunRefitScreen {
         }
         PoseStack pose = graphics.pose();
         pose.pushPose();
-        pose.translate(x + 6, y + 4, 0);
+        pose.translate(x + 6, y + 5, 0);
         pose.scale(scale, scale, 1f);
         float localLeft = 0f;
         for (int c = 0; c < INFO_COLUMNS; c++) {
@@ -3702,7 +3703,7 @@ public class ZtRefitScreen extends GunRefitScreen {
             }
         }
 
-        graphics.renderItem(candidate, x + 6, y + 4);
+        graphics.renderItem(candidate, x + 6, y + 5);
         float scale = layout().infoScale();
         int rows = Math.max(1, (int) ((layout().detail().h() - 12) / (INFO_LINE_H * scale)));
         List<FormattedCharSequence> wrapped = new ArrayList<>();
@@ -3712,7 +3713,7 @@ public class ZtRefitScreen extends GunRefitScreen {
         attachScroll = Mth.clamp(attachScroll, 0, Math.max(0, wrapped.size() - rows));
         PoseStack pose = graphics.pose();
         pose.pushPose();
-        pose.translate(x + 26, y + 4, 0);
+        pose.translate(x + 26, y + 5, 0);
         pose.scale(scale, scale, 1f);
         for (int i = attachScroll; i < Math.min(wrapped.size(), attachScroll + rows); i++) {
             graphics.drawString(this.font, recolorInk(wrapped.get(i)), 0,

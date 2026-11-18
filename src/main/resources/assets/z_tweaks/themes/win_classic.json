@@ -29,7 +29,7 @@
     "detail_left_ratio": 0.40,
     "info_font_scale": 0.84,
     "panel_padding": 5,
-    "slot_gap": 6
+    "slot_gap": 8
   },
   "chrome": {
     "frame": {
@@ -37,13 +37,13 @@
         "style": "bevel",
         "texture": "z_tweaks:textures/gui/theme/win_classic.png",
         "u": 0, "v": 0, "width": 64, "height": 64,
-        "left": 8, "top": 8, "right": 8, "bottom": 8
+        "left": 4, "top": 4, "right": 4, "bottom": 4
       },
       "popup": {
         "style": "bevel",
         "texture": "z_tweaks:textures/gui/theme/win_classic.png",
         "u": 64, "v": 0, "width": 64, "height": 64,
-        "left": 8, "top": 8, "right": 8, "bottom": 8
+        "left": 4, "top": 4, "right": 4, "bottom": 4
       }
     },
     "title_bar": {
