@@ -32,8 +32,8 @@ public record ZtTheme(String id,
     /**
      * 面板质感。
      *
-     * <p>只有三档，因为 1.20.1 的 GUI 画不出背景模糊：所谓"玻璃"只能靠半透明 + 高光描边 + 渐变
-     * 仿真（见 ADR-0008 第 4 条）。</p>
+     * <p>只有三档。{@link #GLASS} 的真实背景模糊由 {@link ScreenBlur}（ADR-0009）提供；
+     * 模糊关闭或采样失败时，退回半透明 + 高光描边 + 渐变。</p>
      */
     public enum Surface {
         /** 上浅下深的纵向渐变（默认主题的现有外观）。 */

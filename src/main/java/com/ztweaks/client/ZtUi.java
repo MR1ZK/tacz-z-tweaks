@@ -18,7 +18,8 @@ import net.minecraft.resources.ResourceLocation;
  * 内边距）不跟 —— 那些数字同时参与绘制、裁剪与命中检测，主题化等于每个主题一套点击判定。</p>
  *
  * <p>面板与圆角都是纯像素画法，不引入任何贴图依赖；半透明由 GUI 渲染管线正常混合（GUI pass 默认
- * 开 blend）。1.20.1 的 GUI 没有背景模糊，所以"玻璃"质感只能靠半透明 + 高光描边 + 渐变仿真。</p>
+ * 开 blend）。1.20.1 的 GUI 默认不采样背景；真实玻璃模糊由 {@link ScreenBlur}（ADR-0009）
+ * 提供，未启用或采样失败时退回半透明 + 高光描边 + 渐变。</p>
  */
 public final class ZtUi {
 
