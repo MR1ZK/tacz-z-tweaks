@@ -14,11 +14,11 @@ public record ThemeChrome(Frame frame, TitleBar titleBar, Corners corners,
     /** 整个装饰层的出厂值：与改造前完全一致（外框发丝线、标题强调色、无角饰/底纹、选中竖条、默认按钮）。 */
     public static final ThemeChrome DEFAULT = new ThemeChrome(
             new Frame(FrameStyle.DEFAULT, FrameStyle.DEFAULT, null, null),
-            new TitleBar(TitleStyle.ACCENT),
+            new TitleBar(TitleStyle.ACCENT, null),
             new Corners(CornerStyle.NONE),
             new Pattern(PatternStyle.NONE, 0.08f),
             new Selection(SelectionStyle.BAR),
-            new Button(ButtonStyle.DEFAULT));
+            new Button(ButtonStyle.DEFAULT, null, null, null));
 
     /** 面板 / 弹层外框：程序化样式打底，贴图九宫格可选覆盖。 */
     public record Frame(FrameStyle panel, FrameStyle popup, NineSlice panelSlice, NineSlice popupSlice) {
@@ -32,7 +32,8 @@ public record ThemeChrome(Frame frame, TitleBar titleBar, Corners corners,
                             int left, int top, int right, int bottom) {
     }
 
-    public record TitleBar(TitleStyle style) {
+    /** 标题条：可选九宫格贴图铺在标题行，缺失时按 {@code style} 程序化绘制。 */
+    public record TitleBar(TitleStyle style, NineSlice slice) {
     }
 
     public record Corners(CornerStyle style) {
@@ -44,7 +45,8 @@ public record ThemeChrome(Frame frame, TitleBar titleBar, Corners corners,
     public record Selection(SelectionStyle style) {
     }
 
-    public record Button(ButtonStyle style) {
+    /** 按钮面：三态各自可选九宫格贴图；缺失时按 {@code style} 程序化绘制。 */
+    public record Button(ButtonStyle style, NineSlice normal, NineSlice hover, NineSlice disabled) {
     }
 
     public enum FrameStyle {

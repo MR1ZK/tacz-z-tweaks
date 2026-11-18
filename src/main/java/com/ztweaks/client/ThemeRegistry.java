@@ -326,7 +326,8 @@ public final class ThemeRegistry {
         JsonObject title = obj(object, "title_bar");
         ThemeChrome.TitleBar titleBar = new ThemeChrome.TitleBar(
                 enumValue(ThemeChrome.TitleStyle.class, str(title, "style", "accent"),
-                        ThemeChrome.TitleStyle.ACCENT));
+                        ThemeChrome.TitleStyle.ACCENT),
+                frameSlice(title));
 
         JsonObject corners = obj(object, "corners");
         ThemeChrome.Corners cornersSpec = new ThemeChrome.Corners(
@@ -347,7 +348,10 @@ public final class ThemeRegistry {
         JsonObject button = obj(object, "button");
         ThemeChrome.Button buttonSpec = new ThemeChrome.Button(
                 enumValue(ThemeChrome.ButtonStyle.class, str(button, "style", "default"),
-                        ThemeChrome.ButtonStyle.DEFAULT));
+                        ThemeChrome.ButtonStyle.DEFAULT),
+                frameSlice(button.get("normal")),
+                frameSlice(button.get("hover")),
+                frameSlice(button.get("disabled")));
 
         return new ThemeChrome(frameSpec, titleBar, cornersSpec, patternSpec, selectionSpec, buttonSpec);
     }

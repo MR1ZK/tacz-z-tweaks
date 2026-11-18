@@ -38,6 +38,23 @@
    }
    ```
 
+   `title_bar` 与 `button` 也是同一套对象写法：`title_bar` 直接带 texture 字段；`button` 的 `normal` / `hover` / `disabled` 各是一个九宫格对象。
+
+   ```json
+   "title_bar": {
+     "style": "banner",
+     "texture": "z_tweaks:textures/gui/theme/aero.png",
+     "u": 0, "v": 128, "width": 128, "height": 16,
+     "left": 4, "top": 2, "right": 4, "bottom": 2
+   },
+   "button": {
+     "style": "bevel",
+     "normal":   { "texture": "...", "u": 0,  "v": 64, "width": 64, "height": 32, "left": 6, "top": 5, "right": 6, "bottom": 5 },
+     "hover":    { "texture": "...", "u": 64, "v": 64, "width": 64, "height": 32, "left": 6, "top": 5, "right": 6, "bottom": 5 },
+     "disabled": { "texture": "...", "u": 0,  "v": 96, "width": 64, "height": 32, "left": 6, "top": 5, "right": 6, "bottom": 5 }
+   }
+   ```
+
    解析时用客户端资源管理器确认贴图存在；不存在就记一条日志、把该九宫格置空，回落到 `style`。
 5. **动效分三档**：`full` / `reduced` / `off`（客户端配置，默认 `full`）。`reduced` 去粒子与流光、保留 120–200ms 过渡；`off` 全即时。粒子/流光只画 2D 屏幕层：背景层在 3D 画面与面板之间，前景层只裁在 3D 预览区。全局上限 96 个、单帧 ≤0.3ms CPU，帧率低于 45 FPS 持续 3 秒自动降一档（只降不升）。
 6. **视觉可以动画，命中永远用最终几何**：切主题时调色板逐色插值 180ms，chrome/effect 在 0.5 处切换，同时叠一层正弦压暗（峰值 22%）把硬切藏住；`metrics` 立刻换成目标，命中从第一帧起就是最终几何。**不做 chrome 双层交叉淡入**：chrome 是立即模式里逐帧重绘的像素，没有可独立合成的图层，双绘一遍等于把整屏画两遍，收益不抵成本；压暗遮罩是同一目的下更便宜的做法。切换过程中再切：从当前插值状态重定向，不排队。

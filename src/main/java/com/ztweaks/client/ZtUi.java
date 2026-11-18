@@ -454,7 +454,18 @@ public final class ZtUi {
             borderColor = current.buttonBorder(semantic, hovered);
             textColor = hovered ? current.buttonText() : TEXT;
         }
-        ThemeChrome.ButtonStyle style = activeChrome.button().style();
+        ThemeChrome.Button buttonSpec = activeChrome.button();
+        ThemeChrome.NineSlice face = !enabled ? buttonSpec.disabled()
+                : (hovered ? buttonSpec.hover() : buttonSpec.normal());
+        if (face != null) {
+            graphics.blitNineSliced(face.texture(), rect.x(), rect.y(), rect.w(), rect.h(),
+                    face.left(), face.top(), face.right(), face.bottom(),
+                    face.width(), face.height(), face.u(), face.v());
+            graphics.drawCenteredString(font, label, rect.x() + rect.w() / 2, rect.y() + 4, textColor);
+            return;
+        }
+
+        ThemeChrome.ButtonStyle style = buttonSpec.style();
         if (style == ThemeChrome.ButtonStyle.FLAT) {
             int fill = enabled && hovered ? ZtTheme.mix(top, 0xFFFFFFFF, 0.10f) : top;
             roundedFill(graphics, rect.x(), rect.y(), rect.w(), rect.h(), fill);

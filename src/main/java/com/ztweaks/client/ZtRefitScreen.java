@@ -1527,9 +1527,17 @@ public class ZtRefitScreen extends GunRefitScreen {
         panel(graphics, x, y, list.w(), height);
 
         // 标题 + 数量徽标（数量是玩家最关心的信息，单独给它一个胶囊）
-        ThemeChrome.TitleStyle titleStyle = chrome().titleBar().style();
+        ThemeChrome.TitleBar titleBar = chrome().titleBar();
+        ThemeChrome.TitleStyle titleStyle = titleBar.style();
+        boolean texturedTitle = titleBar.slice() != null;
         int titleColor = ACCENT;
-        if (titleStyle == ThemeChrome.TitleStyle.BANNER) {
+        if (texturedTitle) {
+            ThemeChrome.NineSlice slice = titleBar.slice();
+            graphics.blitNineSliced(slice.texture(), x + 1, y + 1, list.w() - 2,
+                    layout().listHeader() - 1, slice.left(), slice.top(), slice.right(), slice.bottom(),
+                    slice.width(), slice.height(), slice.u(), slice.v());
+            titleColor = ZtUi.theme().onLightPanel() ? TEXT : ACCENT_LIGHT;
+        } else if (titleStyle == ThemeChrome.TitleStyle.BANNER) {
             int headerBottom = y + layout().listHeader() - 1;
             graphics.fillGradient(x + 1, y + 1, x + list.w() - 1, headerBottom,
                     ZtTheme.withAlpha(ACCENT, 0x38), ZtTheme.withAlpha(ACCENT, 0x10));
@@ -1553,11 +1561,13 @@ public class ZtRefitScreen extends GunRefitScreen {
                 graphics.drawString(this.font, note, noteX, y + 4, BLOCKED, false);
             }
         }
-        int headerRule = y + layout().listHeader() - 3;
-        graphics.fill(x + 4, headerRule, right - 4, headerRule + 1, HAIRLINE);
-        // 标题下沿先压一小段强调色再交给发丝线：一个小小的"分节"记号，不额外占行高
-        graphics.fill(x + 4, headerRule, Math.min(x + 26, right - 4), headerRule + 1,
-                ZtTheme.withAlpha(ACCENT, 0xAA));
+        if (!texturedTitle) {
+            int headerRule = y + layout().listHeader() - 3;
+            graphics.fill(x + 4, headerRule, right - 4, headerRule + 1, HAIRLINE);
+            // 标题下沿先压一小段强调色再交给发丝线：一个小小的"分节"记号，不额外占行高
+            graphics.fill(x + 4, headerRule, Math.min(x + 26, right - 4), headerRule + 1,
+                    ZtTheme.withAlpha(ACCENT, 0xAA));
+        }
 
         int rows = visibleRows();
         int maxScroll = Math.max(0, candidates.size() - rows);
