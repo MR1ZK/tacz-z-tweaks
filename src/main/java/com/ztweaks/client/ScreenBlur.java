@@ -97,10 +97,10 @@ public final class ScreenBlur {
 
         framebufferTexture = TextureUtil.generateTextureId();
         TextureUtil.prepareImage(framebufferTexture, blurWidth, blurHeight);
-        GL11.glBindTexture(GL11.GL_TEXTURE_2D, framebufferTexture);
+        com.mojang.blaze3d.platform.GlStateManager._bindTexture(framebufferTexture);
         GL11.glTexParameteri(GL11.GL_TEXTURE_2D, GL11.GL_TEXTURE_MIN_FILTER, GL11.GL_LINEAR);
         GL11.glTexParameteri(GL11.GL_TEXTURE_2D, GL11.GL_TEXTURE_MAG_FILTER, GL11.GL_LINEAR);
-        GL11.glBindTexture(GL11.GL_TEXTURE_2D, 0);
+        com.mojang.blaze3d.platform.GlStateManager._bindTexture(0);
 
         framebuffer = com.mojang.blaze3d.platform.GlStateManager.glGenFramebuffers();
         com.mojang.blaze3d.platform.GlStateManager._glBindFramebuffer(GL30.GL_FRAMEBUFFER, framebuffer);
@@ -179,6 +179,7 @@ public final class ScreenBlur {
             framebuffer = -1;
         }
         if (framebufferTexture != -1) {
+            com.mojang.blaze3d.platform.GlStateManager._bindTexture(0);
             GL11.glDeleteTextures(framebufferTexture);
             framebufferTexture = -1;
         }
