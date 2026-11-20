@@ -408,14 +408,70 @@ public final class ZtUi {
         graphics.disableScissor();
     }
 
+    /**
+     * 1.21 移除了 {@code blitNineSliced}，这里用 11 参 {@code blit} 手工拼九块。
+     * atlas 画布固定 256×256（见 ADR-0008），源矩形由 {@link ThemeChrome.NineSlice} 给出。
+     */
+    public static void nineSlice(GuiGraphics graphics, ThemeChrome.NineSlice slice,
+                                 int x, int y, int w, int h) {
+        if (slice == null || w <= 0 || h <= 0) {
+            return;
+        }
+        int left = Math.min(slice.left(), w / 2);
+        int right = Math.min(slice.right(), w - left);
+        int top = Math.min(slice.top(), h / 2);
+        int bottom = Math.min(slice.bottom(), h - top);
+        int centerW = Math.max(0, w - left - right);
+        int centerH = Math.max(0, h - top - bottom);
+        int sourceCenterW = Math.max(0, slice.width() - slice.left() - slice.right());
+        int sourceCenterH = Math.max(0, slice.height() - slice.top() - slice.bottom());
+
+        // 四角
+        blit(graphics, slice, x, y, left, top, 0, 0, slice.left(), slice.top());
+        blit(graphics, slice, x + w - right, y, right, top,
+                slice.width() - slice.right(), 0, slice.right(), slice.top());
+        blit(graphics, slice, x, y + h - bottom, left, bottom,
+                0, slice.height() - slice.bottom(), slice.left(), slice.bottom());
+        blit(graphics, slice, x + w - right, y + h - bottom, right, bottom,
+                slice.width() - slice.right(), slice.height() - slice.bottom(),
+                slice.right(), slice.bottom());
+        // 上下边
+        if (centerW > 0) {
+            blit(graphics, slice, x + left, y, centerW, top,
+                    slice.left(), 0, sourceCenterW, slice.top());
+            blit(graphics, slice, x + left, y + h - bottom, centerW, bottom,
+                    slice.left(), slice.height() - slice.bottom(), sourceCenterW, slice.bottom());
+        }
+        // 左右边
+        if (centerH > 0) {
+            blit(graphics, slice, x, y + top, left, centerH,
+                    0, slice.top(), slice.left(), sourceCenterH);
+            blit(graphics, slice, x + w - right, y + top, right, centerH,
+                    slice.width() - slice.right(), slice.top(), slice.right(), sourceCenterH);
+        }
+        // 中心
+        if (centerW > 0 && centerH > 0) {
+            blit(graphics, slice, x + left, y + top, centerW, centerH,
+                    slice.left(), slice.top(), sourceCenterW, sourceCenterH);
+        }
+    }
+
+    private static void blit(GuiGraphics graphics, ThemeChrome.NineSlice slice,
+                             int x, int y, int w, int h,
+                             int sourceX, int sourceY, int sourceW, int sourceH) {
+        if (w <= 0 || h <= 0 || sourceW <= 0 || sourceH <= 0) {
+            return;
+        }
+        graphics.blit(slice.texture(), x, y, w, h,
+                slice.u() + sourceX, slice.v() + sourceY, sourceW, sourceH, 256, 256);
+    }
+
     /** 外框：有贴图九宫格就用贴图，否则按样式程序化绘制。 */
     private static void frame(GuiGraphics graphics, int x, int y, int w, int h,
                               ThemeChrome.FrameStyle style, ThemeChrome.NineSlice slice,
                               int border, int highlight, int shade) {
         if (slice != null) {
-            graphics.blitNineSliced(slice.texture(), x, y, w, h,
-                    slice.left(), slice.top(), slice.right(), slice.bottom(),
-                    slice.width(), slice.height(), slice.u(), slice.v());
+            nineSlice(graphics, slice, x, y, w, h);
             return;
         }
         switch (style) {
@@ -554,9 +610,7 @@ public final class ZtUi {
         if (face == null) {
             return false;
         }
-        graphics.blitNineSliced(face.texture(), rect.x(), rect.y(), rect.w(), rect.h(),
-                face.left(), face.top(), face.right(), face.bottom(),
-                face.width(), face.height(), face.u(), face.v());
+        nineSlice(graphics, face, rect.x(), rect.y(), rect.w(), rect.h());
         return true;
     }
 

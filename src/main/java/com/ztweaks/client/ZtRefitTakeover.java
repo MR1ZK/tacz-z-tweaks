@@ -5,10 +5,10 @@ import com.tacz.guns.client.gui.GunRefitScreen;
 import com.ztweaks.ZTweaksMod;
 import com.ztweaks.config.ZtConfig;
 import net.minecraft.client.gui.screens.Screen;
-import net.minecraftforge.api.distmarker.Dist;
-import net.minecraftforge.client.event.ScreenEvent;
-import net.minecraftforge.eventbus.api.SubscribeEvent;
-import net.minecraftforge.fml.common.Mod;
+import net.neoforged.api.distmarker.Dist;
+import net.neoforged.bus.api.SubscribeEvent;
+import net.neoforged.fml.common.EventBusSubscriber;
+import net.neoforged.neoforge.client.event.ScreenEvent;
 import org.slf4j.Logger;
 
 /**
@@ -17,7 +17,7 @@ import org.slf4j.Logger;
  * <p>用 {@code ScreenEvent.Opening} 拦截所有 {@code setScreen} 调用点
  * （按键、其它模组、服务端刷新一并接管），无需 mixin。</p>
  */
-@Mod.EventBusSubscriber(modid = ZTweaksMod.MOD_ID, value = Dist.CLIENT)
+@EventBusSubscriber(modid = ZTweaksMod.MOD_ID, value = Dist.CLIENT)
 public final class ZtRefitTakeover {
 
     private static final Logger LOGGER = LogUtils.getLogger();

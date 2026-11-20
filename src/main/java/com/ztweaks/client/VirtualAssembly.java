@@ -5,7 +5,6 @@ import com.tacz.guns.api.item.IGun;
 import com.tacz.guns.api.item.attachment.AttachmentType;
 import net.minecraft.client.Minecraft;
 import net.minecraft.client.player.LocalPlayer;
-import net.minecraft.nbt.CompoundTag;
 import com.ztweaks.config.ZtConfig;
 import net.minecraft.resources.ResourceLocation;
 import net.minecraft.world.item.ItemStack;
@@ -48,8 +47,7 @@ public final class VirtualAssembly {
     private static ItemStack cachedClone = null;
     @Nullable
     private static ResourceLocation cachedGunId = null;
-    @Nullable
-    private static CompoundTag cachedBaseTag = null;
+    private static ItemStack cachedBaseStack = ItemStack.EMPTY;
 
     // 诊断读数：命中（渲染入口确实生效过）与重建（克隆次数）。前者为 0 说明 mixin 没注入。
     private static int hits = 0;
@@ -124,15 +122,18 @@ public final class VirtualAssembly {
             return incoming;
         }
 
-        CompoundTag baseTag = incoming.getTag();
-        if (cachedClone != null && gunId.equals(cachedGunId) && Objects.equals(cachedBaseTag, baseTag)) {
+        if (cachedClone != null && gunId.equals(cachedGunId)
+                && ItemStack.matches(incoming, cachedBaseStack)) {
             return cachedClone;
         }
+        if (minecraft.level == null) {
+            return incoming;
+        }
         ItemStack clone = incoming.copy();
-        iGun.installAttachment(clone, candidate);
+        iGun.installAttachment(minecraft.level.registryAccess(), clone, candidate);
         cachedClone = clone;
         cachedGunId = gunId;
-        cachedBaseTag = baseTag == null ? null : baseTag.copy();
+        cachedBaseStack = incoming.copy();
         builds++;
         return clone;
     }
@@ -155,7 +156,7 @@ public final class VirtualAssembly {
     private static void invalidate() {
         cachedClone = null;
         cachedGunId = null;
-        cachedBaseTag = null;
+        cachedBaseStack = ItemStack.EMPTY;
     }
 
     @Nullable

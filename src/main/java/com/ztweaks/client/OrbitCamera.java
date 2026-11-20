@@ -179,7 +179,7 @@ public final class OrbitCamera {
                     .mul(cam)
                     .translate(-pivotX, -pivotY, 0f);
         }
-        poseStack.mulPoseMatrix(cam);
+        poseStack.mulPose(cam);
         // ③ 平移 —— 前置到当前 pose，等价于在屏幕上整体挪动武器
         if (offsetX != 0f || offsetY != 0f) {
             Matrix4f pose = poseStack.last().pose();

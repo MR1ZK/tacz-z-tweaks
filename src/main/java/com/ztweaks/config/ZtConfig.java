@@ -1,6 +1,6 @@
 package com.ztweaks.config;
 
-import net.minecraftforge.common.ForgeConfigSpec;
+import net.neoforged.neoforge.common.ModConfigSpec;
 
 /**
  * 客户端配置。
@@ -36,57 +36,57 @@ public final class ZtConfig {
         ORIGIN
     }
 
-    public static final ForgeConfigSpec SPEC;
+    public static final ModConfigSpec SPEC;
 
     // ------------------------------------------------------------------ refit
-    public static final ForgeConfigSpec.EnumValue<ProsConsMode> PROS_CONS_MODE;
+    public static final ModConfigSpec.EnumValue<ProsConsMode> PROS_CONS_MODE;
     /** 是否接管原生改装界面；关掉即回到 TACZ 原生界面（逃生开关）。 */
-    public static final ForgeConfigSpec.BooleanValue TAKEOVER;
+    public static final ModConfigSpec.BooleanValue TAKEOVER;
     /** 是否启用轨道相机（硬关：关掉后 V 键也开不回来）。 */
-    public static final ForgeConfigSpec.BooleanValue ORBIT_CAMERA;
+    public static final ModConfigSpec.BooleanValue ORBIT_CAMERA;
     /** 是否启用悬停虚拟装配（硬关）。 */
-    public static final ForgeConfigSpec.BooleanValue VIRTUAL_ASSEMBLY;
+    public static final ModConfigSpec.BooleanValue VIRTUAL_ASSEMBLY;
 
     // ------------------------------------------------------------------ look
     /**
      * 界面主题 id（见 ADR-0008）。两个入口读写同一项：改装界面左上角的按钮、配置屏那一行。
      * 存字符串而不是枚举：资源包可以新增主题，枚举装不下。旧配置里的枚举名会在读取时映射到新 id。
      */
-    public static final ForgeConfigSpec.ConfigValue<String> THEME;
+    public static final ModConfigSpec.ConfigValue<String> THEME;
     /**
      * 默认主题的自定义强调色（0xRRGGBB）。**只对默认主题生效** —— 其余主题的强调色是它调性的
      * 组成部分，随手改会立刻变味。压在强调色上的文字按亮度自动切黑 / 白，所以纯黑也看得清。
      */
-    public static final ForgeConfigSpec.IntValue THEME_ACCENT;
+    public static final ModConfigSpec.IntValue THEME_ACCENT;
     /** 动效档位：FULL / REDUCED / OFF。运行时自动降级只影响本次界面，不改这个值。 */
-    public static final ForgeConfigSpec.EnumValue<Motion> MOTION;
+    public static final ModConfigSpec.EnumValue<Motion> MOTION;
     /** 玻璃主题的背景模糊；关掉后玻璃面板退回半透明底色。 */
-    public static final ForgeConfigSpec.BooleanValue BLUR;
+    public static final ModConfigSpec.BooleanValue BLUR;
 
     // ------------------------------------------------------------------ debug
     /** 左上角诊断 HUD：mixin 命中数、相机读数、枢轴读数、取景进度、字体测试。 */
-    public static final ForgeConfigSpec.BooleanValue DEBUG_HUD;
+    public static final ModConfigSpec.BooleanValue DEBUG_HUD;
     /** 对照样本：在详情条里打印 TACZ 成品文本原文（含色码）。 */
-    public static final ForgeConfigSpec.BooleanValue DEBUG_SAMPLES;
+    public static final ModConfigSpec.BooleanValue DEBUG_SAMPLES;
     /** G 键：叠加原生 {@code GunPropertyDiagrams} 属性条做对照。 */
-    public static final ForgeConfigSpec.BooleanValue DEBUG_NATIVE_BARS;
+    public static final ModConfigSpec.BooleanValue DEBUG_NATIVE_BARS;
     /** V 键：运行时开关轨道相机（关掉即纯原生取景，用于开关对照）。 */
-    public static final ForgeConfigSpec.BooleanValue DEBUG_CAMERA_HOTKEY;
+    public static final ModConfigSpec.BooleanValue DEBUG_CAMERA_HOTKEY;
     /** 枢轴取法：{@code ROOT_PIVOT} 贴枪身长轴 / {@code ORIGIN} 修复前的模型原点。 */
-    public static final ForgeConfigSpec.EnumValue<PivotSource> PIVOT_SOURCE;
+    public static final ModConfigSpec.EnumValue<PivotSource> PIVOT_SOURCE;
     /** 枢轴微调：在 {@link #PIVOT_SOURCE} 之上再抬高/降低多少格。 */
-    public static final ForgeConfigSpec.DoubleValue PIVOT_OFFSET_Y;
+    public static final ModConfigSpec.DoubleValue PIVOT_OFFSET_Y;
     /** 上下拖一整屏高对应的滚转角度（度）。 */
-    public static final ForgeConfigSpec.DoubleValue ROLL_SPEED;
+    public static final ModConfigSpec.DoubleValue ROLL_SPEED;
     /** 左右拖一整屏宽对应的环绕角度（度）。 */
-    public static final ForgeConfigSpec.DoubleValue YAW_SPEED;
+    public static final ModConfigSpec.DoubleValue YAW_SPEED;
     /** 右键拖一整屏对应的平移距离（格）。 */
-    public static final ForgeConfigSpec.DoubleValue PAN_SPEED;
+    public static final ModConfigSpec.DoubleValue PAN_SPEED;
     /** 滚轮每格对应的缩放增量。 */
-    public static final ForgeConfigSpec.DoubleValue ZOOM_STEP;
+    public static final ModConfigSpec.DoubleValue ZOOM_STEP;
 
     static {
-        ForgeConfigSpec.Builder builder = new ForgeConfigSpec.Builder();
+        ModConfigSpec.Builder builder = new ModConfigSpec.Builder();
         builder.comment("改装界面").push("refit");
         PROS_CONS_MODE = builder
                 .comment("候选配件 Pros/Cons 的生成方式",

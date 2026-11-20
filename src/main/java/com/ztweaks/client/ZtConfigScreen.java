@@ -10,8 +10,8 @@ import net.minecraft.client.gui.screens.Screen;
 import net.minecraft.network.chat.CommonComponents;
 import net.minecraft.network.chat.Component;
 import net.minecraft.util.Mth;
-import net.minecraftforge.client.gui.widget.ForgeSlider;
-import net.minecraftforge.common.ForgeConfigSpec;
+import net.neoforged.neoforge.client.gui.widget.ExtendedSlider;
+import net.neoforged.neoforge.common.ModConfigSpec;
 
 import java.util.ArrayList;
 import java.util.List;
@@ -91,7 +91,7 @@ public final class ZtConfigScreen extends Screen {
         addRow(header);
     }
 
-    private <T extends Enum<T>> void addEnum(String id, ForgeConfigSpec.EnumValue<T> spec, T[] values) {
+    private <T extends Enum<T>> void addEnum(String id, ModConfigSpec.EnumValue<T> spec, T[] values) {
         addRow(CycleButton.<T>builder(v -> Component.literal(v.name()))
                 .withValues(values)
                 .withInitialValue(spec.get())
@@ -117,7 +117,7 @@ public final class ZtConfigScreen extends Screen {
                 }));
     }
 
-    private void addBool(String id, ForgeConfigSpec.BooleanValue spec) {
+    private void addBool(String id, ModConfigSpec.BooleanValue spec) {
         addRow(CycleButton.onOffBuilder(spec.get())
                 .create(0, 0, 310, 20, label(id), (btn, v) -> spec.set(v)));
     }
@@ -128,7 +128,7 @@ public final class ZtConfigScreen extends Screen {
      * <p>两个方向都写配置值，但输入框不把滑块拖回去 —— 输入过程中会经过空串、
      * 单独的负号、半个小数这些中间态，动滑块会让数字乱跳。</p>
      */
-    private void addNumber(String id, ForgeConfigSpec.DoubleValue spec, double min, double max,
+    private void addNumber(String id, ModConfigSpec.DoubleValue spec, double min, double max,
                            double step, int precision) {
         EditBox box = new EditBox(this.font, 0, 0, 70, 20, Component.empty());
         box.setMaxLength(16);
@@ -140,7 +140,7 @@ public final class ZtConfigScreen extends Screen {
                 // 还在输入，等玩家输完再算
             }
         });
-        ForgeSlider slider = new ForgeSlider(0, 0, 234, 20, label(id), Component.empty(),
+        ExtendedSlider slider = new ExtendedSlider(0, 0, 234, 20, label(id), Component.empty(),
                 min, max, spec.get(), step, precision, true) {
             @Override
             protected void applyValue() {
@@ -182,8 +182,8 @@ public final class ZtConfigScreen extends Screen {
 
     @Override
     public void render(GuiGraphics graphics, int mouseX, int mouseY, float partialTick) {
-        this.renderBackground(graphics);
-        // 配置屏控件仍是 Forge 原生；只把底与外框换成当前主题，避免和改装界面完全两个世界
+        super.renderBackground(graphics, mouseX, mouseY, partialTick);
+        // 配置屏控件仍是 NeoForge 原生；只把底与外框换成当前主题，避免和改装界面完全两个世界
         int panelW = 330;
         int panelH = Math.max(40, this.height - TOP - BOTTOM_MARGIN + 16);
         ZtUi.panel(graphics, this.width / 2 - panelW / 2, TOP - 22, panelW, panelH);
@@ -194,10 +194,10 @@ public final class ZtConfigScreen extends Screen {
     }
 
     @Override
-    public boolean mouseScrolled(double mouseX, double mouseY, double delta) {
+    public boolean mouseScrolled(double mouseX, double mouseY, double scrollX, double scrollY) {
         int bottom = this.height - BOTTOM_MARGIN;
         int max = Math.max(0, this.rows.size() * ROW_H - (bottom - TOP));
-        this.scroll = Mth.clamp((int) (this.scroll - delta * ROW_H), 0, max);
+        this.scroll = Mth.clamp((int) (this.scroll - scrollY * ROW_H), 0, max);
         return true;
     }
 

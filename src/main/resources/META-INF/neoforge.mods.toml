@@ -1,6 +1,6 @@
 modLoader = "javafml"
-loaderVersion = "[46,)"
-license = "GPL-3.0"
+loaderVersion = "[1,)"
+license = "GPL-3.0-only"
 
 [[mods]]
 modId = "z_tweaks"
@@ -11,26 +11,26 @@ description = '''
 TACZ 附属：接管改装界面，以 GUI 形式提供更好的武器预览、更简单的改装流程与更易阅读的配件简介和参数。
 '''
 
+[[mixins]]
+config = "z_tweaks.mixins.json"
+
 [[dependencies.z_tweaks]]
-modId = "forge"
-mandatory = true
-versionRange = "[46,)"
+modId = "neoforge"
+type = "required"
+versionRange = "[21.1.0,)"
 ordering = "NONE"
 side = "BOTH"
 
 [[dependencies.z_tweaks]]
 modId = "minecraft"
-mandatory = true
-versionRange = "[1.20,1.20.2)"
+type = "required"
+versionRange = "[1.21.1]"
 ordering = "NONE"
 side = "BOTH"
 
 [[dependencies.z_tweaks]]
 modId = "tacz"
-mandatory = true
-# 下限 1.1.4：空 range 实测会导致加载崩溃；1.1.4 之前的 TACZ 内部结构差异太大。
-# 1.2.0 起 applyFirstPersonPositioningTransform 改成 6 参，轨道相机 mixin 已改注
-# 两版都有的 applyAnimationConstraintTransform；当前只对 1.2.0-hotfix 实机冒烟过。
-versionRange = "[1.1.4,)"
+type = "required"
+versionRange = "[1.2.0,)"
 ordering = "AFTER"
 side = "BOTH"

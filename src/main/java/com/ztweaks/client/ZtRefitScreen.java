@@ -19,7 +19,6 @@ import com.tacz.guns.client.resource.GunDisplayInstance;
 import com.tacz.guns.client.resource.index.ClientAttachmentIndex;
 import com.tacz.guns.client.resource.pojo.display.LaserConfig;
 import com.tacz.guns.client.sound.SoundPlayManager;
-import com.tacz.guns.network.NetworkHandler;
 import com.tacz.guns.network.message.ClientMessageRefitGun;
 import com.tacz.guns.network.message.ClientMessageUnloadAttachment;
 import com.tacz.guns.resource.modifier.AttachmentCacheProperty;
@@ -35,12 +34,13 @@ import com.ztweaks.config.ZtConfig;
 import com.ztweaks.preset.PresetStore;
 import com.mojang.blaze3d.vertex.PoseStack;
 import net.minecraft.Util;
+import net.minecraft.client.Minecraft;
+import net.minecraft.core.HolderLookup;
 import net.minecraft.client.gui.GuiGraphics;
 import net.minecraft.client.gui.components.EditBox;
 import net.minecraft.client.player.LocalPlayer;
 import net.minecraft.client.resources.language.I18n;
 import net.minecraft.ChatFormatting;
-import net.minecraft.nbt.CompoundTag;
 import net.minecraft.network.chat.Component;
 import net.minecraft.network.chat.MutableComponent;
 import net.minecraft.network.chat.TextColor;
@@ -49,6 +49,7 @@ import net.minecraft.util.FormattedCharSequence;
 import net.minecraft.util.Mth;
 import net.minecraft.world.entity.player.Inventory;
 import net.minecraft.world.item.ItemStack;
+import net.neoforged.neoforge.network.PacketDistributor;
 import org.lwjgl.glfw.GLFW;
 
 import javax.annotation.Nullable;
@@ -318,7 +319,7 @@ public class ZtRefitScreen extends GunRefitScreen {
     @Nullable
     private ResourceLocation deltaGunId = null;
     @Nullable
-    private CompoundTag deltaGunTag = null;
+    private ItemStack deltaGunSnapshot = ItemStack.EMPTY;
     @Nullable
     private ResourceLocation deltaItemId = null;
     /** 各列独立滚动的偏移量，以及上一帧算出的各列行数（用来夹取偏移）。 */
@@ -334,7 +335,7 @@ public class ZtRefitScreen extends GunRefitScreen {
     @Nullable
     private ResourceLocation gunInfoId = null;
     @Nullable
-    private CompoundTag gunInfoTag = null;
+    private ItemStack gunInfoSnapshot = ItemStack.EMPTY;
 
     private String popup = "";
     private long popupUntil = 0;
@@ -628,7 +629,7 @@ public class ZtRefitScreen extends GunRefitScreen {
         if (iGun == null) {
             return;
         }
-        ItemStack laser = iGun.getAttachment(gun, current);
+        ItemStack laser = iGun.getAttachment(registries(), gun, current);
         if (laser.getItem() instanceof IAttachment attachment) {
             TimelessAPI.getClientAttachmentIndex(attachment.getAttachmentId(laser))
                     .map(ClientAttachmentIndex::getLaserConfig)
@@ -645,6 +646,12 @@ public class ZtRefitScreen extends GunRefitScreen {
     }
 
     // ---------------------------------------------------------------- 数据
+
+    /** 1.21 的 IGun / DataComponents 需要注册表访问器；界面只在世界内打开。 */
+    private static HolderLookup.Provider registries() {
+        Minecraft minecraft = Minecraft.getInstance();
+        return minecraft.level == null ? null : minecraft.level.registryAccess();
+    }
 
     private ItemStack gunStack() {
         LocalPlayer player = getMinecraft().player;
@@ -863,7 +870,7 @@ public class ZtRefitScreen extends GunRefitScreen {
                                              ItemStack candidate) {
         try {
             ItemStack modified = gun.copy();
-            iGun.installAttachment(modified, candidate);
+            iGun.installAttachment(registries(), modified, candidate);
             AttachmentCacheProperty after = new AttachmentCacheProperty();
             after.eval(modified, gunData);
             return StatCatalog.marginal(stat, modified, gunData, base, after);
@@ -919,14 +926,13 @@ public class ZtRefitScreen extends GunRefitScreen {
         IGun iGun = IGun.getIGunOrNull(gun);
         Candidate preview = previewCandidate();
         ResourceLocation gunId = iGun == null ? null : iGun.getGunId(gun);
-        CompoundTag tag = gun.getTag();
         ResourceLocation itemId = preview == null ? null : attachmentIdOf(preview.stack());
-        if (Objects.equals(gunId, deltaGunId) && Objects.equals(deltaGunTag, tag)
+        if (Objects.equals(gunId, deltaGunId) && ItemStack.matches(gun, deltaGunSnapshot)
                 && Objects.equals(deltaItemId, itemId)) {
             return;
         }
         deltaGunId = gunId;
-        deltaGunTag = tag == null ? null : tag.copy();
+        deltaGunSnapshot = gun.copy();
         deltaItemId = itemId;
         deltaScroll = 0;
         infoExtra.clear();
@@ -1011,7 +1017,7 @@ public class ZtRefitScreen extends GunRefitScreen {
         AttachmentCacheProperty base = new AttachmentCacheProperty();
         base.eval(gun, gunData);
         ItemStack withCandidate = gun.copy();
-        iGun.installAttachment(withCandidate, candidate);
+        iGun.installAttachment(registries(), withCandidate, candidate);
         AttachmentCacheProperty modified = new AttachmentCacheProperty();
         modified.eval(withCandidate, gunData);
 
@@ -1500,7 +1506,7 @@ public class ZtRefitScreen extends GunRefitScreen {
                 roundedBorder(graphics, rect.x(), rect.y(), rect.w(), rect.h(), BROKEN_BORDER);
             }
 
-            ItemStack installed = iGun == null ? ItemStack.EMPTY : iGun.getAttachment(gun, type);
+            ItemStack installed = iGun == null ? ItemStack.EMPTY : iGun.getAttachment(registries(), gun, type);
             if (!installed.isEmpty()) {
                 graphics.renderItem(installed, rect.x() + 3, rect.y() + 3);
             } else {
@@ -1566,9 +1572,8 @@ public class ZtRefitScreen extends GunRefitScreen {
         int titleColor = ACCENT;
         if (texturedTitle) {
             ThemeChrome.NineSlice slice = titleBar.slice();
-            graphics.blitNineSliced(slice.texture(), x + 1, y + 1, list.w() - 2,
-                    layout().listHeader() - 1, slice.left(), slice.top(), slice.right(), slice.bottom(),
-                    slice.width(), slice.height(), slice.u(), slice.v());
+            nineSlice(graphics, slice, x + 1, y + 1, list.w() - 2,
+                    layout().listHeader() - 1);
             titleColor = ZtUi.theme().onLightPanel() ? TEXT : ACCENT_LIGHT;
         } else if (titleStyle == ThemeChrome.TitleStyle.BANNER) {
             int headerBottom = y + layout().listHeader() - 1;
@@ -2347,7 +2352,7 @@ public class ZtRefitScreen extends GunRefitScreen {
         }
         ItemStack gun = gunStack();
         IGun iGun = IGun.getIGunOrNull(gun);
-        return iGun != null && !iGun.getAttachment(gun, type).isEmpty();
+        return iGun != null && !iGun.getAttachment(registries(), gun, type).isEmpty();
     }
 
     /**
@@ -2633,50 +2638,50 @@ public class ZtRefitScreen extends GunRefitScreen {
     }
 
     @Override
-    public boolean mouseScrolled(double mouseX, double mouseY, double delta) {
+    public boolean mouseScrolled(double mouseX, double mouseY, double scrollX, double scrollY) {
         // 预设弹层同理：指针落在它上面就滚它自己
         if (presetMenuOpen && presetMenuRect().contains(mouseX, mouseY)) {
-            presetMenuScroll = Mth.clamp(presetMenuScroll - (int) Math.signum(delta) * layout().menuRowH(),
+            presetMenuScroll = Mth.clamp(presetMenuScroll - (int) Math.signum(scrollY) * layout().menuRowH(),
                     0, presetMenuMaxScroll());
             return true;
         }
         // 主题弹层同理
         if (themeMenuOpen && themeMenuRect().contains(mouseX, mouseY)) {
-            themeMenuScroll = Mth.clamp(themeMenuScroll - (int) Math.signum(delta) * layout().menuRowH(),
+            themeMenuScroll = Mth.clamp(themeMenuScroll - (int) Math.signum(scrollY) * layout().menuRowH(),
                     0, themeMenuMaxScroll());
             return true;
         }
         // 弹出层展开时，指针落在它上面就滚它自己（内容可能高过视口），不穿透给底下的列表
         if (sortMenuOpen && sortMenuRect().contains(mouseX, mouseY)) {
-            sortMenuScroll = Mth.clamp(sortMenuScroll - (int) Math.signum(delta) * layout().menuRowH(),
+            sortMenuScroll = Mth.clamp(sortMenuScroll - (int) Math.signum(scrollY) * layout().menuRowH(),
                     0, sortMenuMaxScroll());
             return true;
         }
         // 指针在候选面板内（但不在底部搜索框 / 排序按钮上）才翻列表，其余位置一律给相机缩放
         if (candidateListVisible() && listRect().contains(mouseX, mouseY)
                 && !searchRect().contains(mouseX, mouseY) && !sortRect().contains(mouseX, mouseY)) {
-            scroll -= (int) Math.signum(delta);
+            scroll -= (int) Math.signum(scrollY);
             return true;
         }
         // 选中配件时：指针落在变化列上就滚它自己（可能超过一屏）
         if (candidateListVisible() && !candidates.isEmpty()
                 && deltaColumnRect().contains(mouseX, mouseY)) {
-            deltaScroll -= (int) Math.signum(delta);
+            deltaScroll -= (int) Math.signum(scrollY);
             return true;
         }
         // 选中配件时：指针落在详情条左列就滚配件描述
         if (candidateListVisible() && !candidates.isEmpty()
                 && attachColumnRect().contains(mouseX, mouseY)) {
-            attachScroll -= (int) Math.signum(delta);
+            attachScroll -= (int) Math.signum(scrollY);
             return true;
         }
         // 概览态：指针落在详情条上就滚信息卡，滚的是指针所在的那一列
         if (!candidateListVisible() && detailRect().contains(mouseX, mouseY) && infoHoverColumn >= 0) {
-            infoScroll[infoHoverColumn] -= (int) Math.signum(delta);
+            infoScroll[infoHoverColumn] -= (int) Math.signum(scrollY);
             return true;
         }
         // 取负：滚轮向上推 = 拉近（枪变大）
-        OrbitCamera.addZoom((float) -delta * ZtConfig.ZOOM_STEP.get().floatValue());
+        OrbitCamera.addZoom((float) -scrollY * ZtConfig.ZOOM_STEP.get().floatValue());
         return true;
     }
 
@@ -2845,7 +2850,7 @@ public class ZtRefitScreen extends GunRefitScreen {
             // 与原生一致：声音在发包前就放（原生 GunRefitScreen 同款），不等服务端确认。
             // 音效取自被装配件自己的 pack 定义，我们只负责触发。
             SoundPlayManager.playerRefitSound(candidate, player, SoundManager.INSTALL_SOUND);
-            NetworkHandler.CHANNEL.sendToServer(
+            PacketDistributor.sendToServer(
                     new ClientMessageRefitGun(inventorySlot, player.getInventory().selected, type));
             notify(I18n.get("gui.z_tweaks.refit.msg.installed", entry.name()));
             return;
@@ -2966,7 +2971,7 @@ public class ZtRefitScreen extends GunRefitScreen {
                 }
                 continue;
             }
-            ItemStack installed = iGun.getAttachment(gun, type);
+            ItemStack installed = iGun.getAttachment(registries(), gun, type);
             String have = installed.isEmpty() ? null : String.valueOf(attachmentIdOf(installed));
             if (want == null) {
                 if (have != null) {
@@ -3002,10 +3007,10 @@ public class ZtRefitScreen extends GunRefitScreen {
         }
         int gunSlot = player.getInventory().selected;
         for (AttachmentType type : plan.unloads()) {
-            NetworkHandler.CHANNEL.sendToServer(new ClientMessageUnloadAttachment(gunSlot, type));
+            PacketDistributor.sendToServer(new ClientMessageUnloadAttachment(gunSlot, type));
         }
         for (PlanEntry entry : plan.installs()) {
-            NetworkHandler.CHANNEL.sendToServer(
+            PacketDistributor.sendToServer(
                     new ClientMessageRefitGun(entry.invSlot(), gunSlot, entry.type()));
         }
         lastPresetName = plan.preset().name;
@@ -3064,7 +3069,7 @@ public class ZtRefitScreen extends GunRefitScreen {
         preset.gun = gunId.toString();
         preset.name = name;
         for (AttachmentType type : slotTypes()) {
-            ItemStack installed = iGun.getAttachment(gun, type);
+            ItemStack installed = iGun.getAttachment(registries(), gun, type);
             ResourceLocation id = installed.isEmpty() ? null : attachmentIdOf(installed);
             if (id != null) {
                 preset.attachments.put(type.name(), id.toString());
@@ -3159,7 +3164,7 @@ public class ZtRefitScreen extends GunRefitScreen {
             notify(I18n.get("gui.z_tweaks.refit.msg.slot_not_allowed", slotName(type)));
             return;
         }
-        ItemStack installed = iGun.getAttachment(gun, type);
+        ItemStack installed = iGun.getAttachment(registries(), gun, type);
         if (installed.isEmpty()) {
             // 空槽位与"概览态"要分开报：右键点空槽还说"概览态"会让人以为点错了地方
             notify(I18n.get("gui.z_tweaks.refit.msg.nothing_to_unload"));
@@ -3176,7 +3181,7 @@ public class ZtRefitScreen extends GunRefitScreen {
         // 只发包：界面交给服务端回来的 ServerMessageRefreshRefitScreen 刷新（它会对
         // 当前 GunRefitScreen 调 init()）。不再本地抢跑写 NBT —— 服务端一旦拒绝，
         // 本地会一直显示"已卸下"。虚拟装配只是渲染件，与这里无关。
-        NetworkHandler.CHANNEL.sendToServer(
+        PacketDistributor.sendToServer(
                 new ClientMessageUnloadAttachment(player.getInventory().selected, type));
         notify(I18n.get("gui.z_tweaks.refit.msg.unloaded", slotName(type)));
     }
@@ -3309,16 +3314,15 @@ public class ZtRefitScreen extends GunRefitScreen {
             infoExtra.clear();
             infoRows.clear();
             gunInfoId = null;
-            gunInfoTag = null;
+            gunInfoSnapshot = ItemStack.EMPTY;
             return;
         }
         ResourceLocation id = iGun.getGunId(gun);
-        CompoundTag tag = gun.getTag();
-        if (id.equals(gunInfoId) && Objects.equals(gunInfoTag, tag)) {
+        if (id.equals(gunInfoId) && ItemStack.matches(gun, gunInfoSnapshot)) {
             return;
         }
         gunInfoId = id;
-        gunInfoTag = tag == null ? null : tag.copy();
+        gunInfoSnapshot = gun.copy();
         infoMain.clear();
         infoStats.clear();
         infoExtra.clear();
@@ -3560,7 +3564,7 @@ public class ZtRefitScreen extends GunRefitScreen {
         }
         // 装到克隆栈上算，不碰手上那把枪（与 measureImprovement、虚拟装配同一条路子）
         ItemStack modified = gun.copy();
-        iGun.installAttachment(modified, preview.stack());
+        iGun.installAttachment(registries(), modified, preview.stack());
         List<ParamRow> after = paramRows(modified, iGun, index.getGunData(), index,
                 baseCache(modified, index.getGunData()));
         infoExtra.clear();

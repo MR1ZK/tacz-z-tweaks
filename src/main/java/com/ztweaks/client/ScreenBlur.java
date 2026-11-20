@@ -29,7 +29,7 @@ public final class ScreenBlur {
 
     private static final Logger LOGGER = LogUtils.getLogger();
     private static final ResourceLocation TEXTURE_ID =
-            new ResourceLocation("z_tweaks", "dynamic/glass_blur");
+            ResourceLocation.fromNamespaceAndPath("z_tweaks", "dynamic/glass_blur");
     /** 回读间隔：8 帧约 7–8 次/秒；对静态背景足够，也避免每帧 glReadPixels 卡住管线。 */
     private static final int INTERVAL = 8;
 
