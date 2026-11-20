@@ -1,8 +1,8 @@
 # 会话上下文摘要
 
-> 2026-11-20 更新，覆盖到 **v0.0.5**（1.21.1 NeoForge Latest）；1.20.1 Forge 对应 **v0.4.2**。0.1.3 之后又走完四轮：① 与 TACZ Addon「随意配件」的对接修复；② **界面主题**（四套：默认（TACZ 青）/ MD3 质感 / 千禧航空 / Win 经典，默认主题可调强调色，见 ADR-0007 与 `CONTEXT.md` 的「主题」「强调色」）；③ **全盘 review（标准 / 规格双轴）及其修复**（按钮三态色与暗角 / HUD 底衬进主题、术语改名、详情条几何合一等）；④ 三条基线味道重构（详情条列几何、`SlotBar` 具名记录、排序键包成 `SortKey`；4/5 与 5/5 经确认不做）。其间还按实机反馈重排了底栏与信息框（名字移到方块下方、底栏不压信息框、浅色主题文字改走黑墨、不可用槽位改红）。面向下一个接手的人（人或 agent）：读完这份文档应该能接着干活，不用翻对话记录。（**2026-10-18 补**：剩下的功能待办已统一标记为「暂时不做」，见「已知问题 / 待办」抬头。同日另做了一轮**主题材质打磨**：面板内侧高光 / 暗边与玻璃高光带、按钮受光面、弹层投影、候选行与当前槽位的强调色渐变、详情条与概览卡的分栏引导线 —— 只动绘制，不碰布局与命中，口径仍在 ADR-0007 的"颜色 + 质感"内。）
+> 2026-11-20 更新，覆盖到 **v0.4.2a**（1.21.1 NeoForge 与 1.20.1 Forge 同版本号）。0.1.3 之后又走完四轮：① 与 TACZ Addon「随意配件」的对接修复；② **界面主题**（四套：默认（TACZ 青）/ MD3 质感 / 千禧航空 / Win 经典，默认主题可调强调色，见 ADR-0007 与 `CONTEXT.md` 的「主题」「强调色」）；③ **全盘 review（标准 / 规格双轴）及其修复**（按钮三态色与暗角 / HUD 底衬进主题、术语改名、详情条几何合一等）；④ 三条基线味道重构（详情条列几何、`SlotBar` 具名记录、排序键包成 `SortKey`；4/5 与 5/5 经确认不做）。其间还按实机反馈重排了底栏与信息框（名字移到方块下方、底栏不压信息框、浅色主题文字改走黑墨、不可用槽位改红）。面向下一个接手的人（人或 agent）：读完这份文档应该能接着干活，不用翻对话记录。（**2026-10-18 补**：剩下的功能待办已统一标记为「暂时不做」，见「已知问题 / 待办」抬头。同日另做了一轮**主题材质打磨**：面板内侧高光 / 暗边与玻璃高光带、按钮受光面、弹层投影、候选行与当前槽位的强调色渐变、详情条与概览卡的分栏引导线 —— 只动绘制，不碰布局与命中，口径仍在 ADR-0007 的"颜色 + 质感"内。）
 
-> **2026-11-20：NeoForge 1.21.1 端口（0.5.0）**。`port/1.21.1-neoforge` 分支已用 ModDevGradle 2.0.148 + NeoForge 21.1.267 + Java 21 编译，并实机进世界打开 `ZtRefitScreen`：轨道相机/虚拟装配 mixin 命中，TACZ NeoForge 1.21.1-1.2.0-hotfix 与四套主题都能加载。Forge 事件/配置/网络、`mouseScrolled`、`PoseStack.mulPose`、`ResourceLocation`、`IGun` 的 `HolderLookup.Provider`、`PacketDistributor` 与手写九宫格已适配。1.20.1 的 TACZ 1.2.0 修复仍在 `main`，随 v0.4.2 发布。
+> **2026-11-20：NeoForge 1.21.1 端口（当前 0.4.2a，与 Forge 同版本）**。`port/1.21.1-neoforge` 分支已用 ModDevGradle 2.0.148 + NeoForge 21.1.267 + Java 21 编译，并实机进世界打开 `ZtRefitScreen`：轨道相机/虚拟装配 mixin 命中，TACZ NeoForge 1.21.1-1.2.0-hotfix 与四套主题都能加载。Forge 事件/配置/网络、`mouseScrolled`、`PoseStack.mulPose`、`ResourceLocation`、`IGun` 的 `HolderLookup.Provider`、`PacketDistributor` 与手写九宫格已适配。1.20.1 的 TACZ 1.2.0 修复仍在 `main`，随 v0.4.2 发布。
 
 > **2026-11-20：TACZ 1.2.0-hotfix 兼容**。1.2.0 把 `FirstPersonRenderGunEvent.applyFirstPersonPositioningTransform` 从 5 参改成 6 参（加了 `AdsPath`），旧 mixin 会静默失效；轨道相机改注 1.1.8/1.2.0 都有的 `applyAnimationConstraintTransform`。已在 1.2.0-hotfix 上启动、进世界、打开改装界面，调试 HUD 的 `mixin hits` 持续增长。1.2.0 的 NeoForge 1.21.1 移植另行开分支。
 
@@ -15,7 +15,8 @@
 **TACZ: Z-Tweaks** —— NeoForge 1.21.1 客户端模组，用自绘 GUI 接管 TACZ（Timeless & Classics Guns）的改装界面（Z 键），提供更好的武器预览、更简单的改装流程、更易读的参数。对标 Garry's Mod 的 ARC-9。GPL-3.0。1.20.1 Forge 版本继续维护在 `main` 分支。
 
 - 仓库：`github.com/MR1ZK/tacz-z-tweaks`；`main` = 1.20.1 Forge，`port/1.21.1-neoforge` = 1.21.1 NeoForge
-- 已发布：**v0.0.5**（2026-11-20，附 `z_tweaks-1.21.1-0.0.5.jar`）—— 1.21.1 NeoForge 端口 + issue #19：右键双击卸下、安装后不跳顶、拖拽方向翻转；ModDevGradle / NeoForge 21.1.267 / Java 21，TACZ NeoForge 1.2.0+
+- 已发布：**v0.4.2a**（2026-11-20，附 `z_tweaks-1.21.1-0.4.2a.jar` 与 Forge 的 `z_tweaks-1.20.1-0.4.2a.jar`）—— 两平台版本号同步；1.21.1 NeoForge 端口 + issue #19：右键双击卸下、安装后不跳顶、拖拽方向翻转；ModDevGradle / NeoForge 21.1.267 / Java 21，TACZ NeoForge 1.2.0+
+- 上一版：**v0.0.5**（2026-11-20，附 `z_tweaks-1.21.1-0.0.5.jar`）—— 1.21.1 NeoForge 首个 issue #19 修复版
 - 上一版：**v0.5.0**（2026-11-20，附 `z_tweaks-1.21.1-0.5.0.jar`）—— 1.21.1 NeoForge 首个端口
 - 已发布：**v0.4.1**（2026-11-18，附 `z_tweaks-1.20.1-0.4.1.jar`）—— 千禧航空接入真实背景模糊（ADR-0009：FBO 降采样 + 小图回读 + `DynamicTexture`，不写 shader）；配置新增 `look.blur`，45 FPS 降级时自动关；FBO 不完整时回落半透明底
 - 上一版：**v0.4.0**（2026-11-18，附 `z_tweaks-1.20.1-0.4.0.jar`）—— 主题系统 v2：JSON 主题（资源包可覆盖/新增）、`RefitLayout` 快照与五个受控参数、`ThemeChrome` 六部件、三张 256×256 九宫格 atlas、`flow` / `spark` / `bokeh` 粒子、180ms 切主题过渡；旧枚举配置自动迁移
