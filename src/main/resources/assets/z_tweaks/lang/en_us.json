@@ -105,7 +105,7 @@
   "gui.z_tweaks.refit.native": "native %s",
   "gui.z_tweaks.refit.install": "INSTALL",
   "gui.z_tweaks.refit.unload": "UNLOAD",
-  "gui.z_tweaks.refit.tip.right_click_unload": "Right-click: unload attachment",
+  "gui.z_tweaks.refit.tip.right_click_unload": "Right double-click: unload attachment",
   "gui.z_tweaks.refit.msg.slot_not_allowed": "slot %s not allowed on this gun",
   "gui.z_tweaks.refit.msg.nothing": "nothing to install",
   "gui.z_tweaks.refit.msg.overview": "overview state: nothing to unload",
