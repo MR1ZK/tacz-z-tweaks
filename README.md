@@ -1,6 +1,6 @@
 # TACZ: Z-Tweaks（TACZ：改装UI调整）
 
-这是一个面向 Minecraft （Forge 1.20.1 或 NeoForge 1.21.1）的 [TACZ](https://github.com/MCModderAnchor/TACZ) 客户端附属模组：把它自带的改装界面换成更好用的一套 —— 对着枪按 **Z**，打开的就是 Z-Tweaks 界面。
+这是一个面向 Minecraft （Forge 1.20.1）的 [TACZ](https://github.com/MCModderAnchor/TACZ) 客户端附属模组：把它自带的改装界面换成更好用的一套 —— 对着枪按 **Z**，打开的就是 Z-Tweaks 界面。
 
 ## 它能帮你做什么
 
