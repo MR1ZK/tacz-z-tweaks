@@ -1,6 +1,6 @@
 # TACZ: Z-Tweaks（TACZ：改装UI调整）
 
-这是一个面向 Minecraft 1.20.1（Forge）的 [TACZ](https://github.com/MCModderAnchor/TACZ) 客户端附属模组：把它自带的改装界面换成更好用的一套 —— 对着枪按 **Z**，打开的就是 Z-Tweaks 界面。
+这是一个面向 Minecraft **1.21.1（NeoForge）** 的 [TACZ](https://github.com/MCModderAnchor/TACZ) 客户端附属模组：把它自带的改装界面换成更好用的一套 —— 对着枪按 **Z**，打开的就是 Z-Tweaks 界面。（1.20.1 Forge 版本继续维护在 `main` 分支，见 v0.4.2。）
 
 ## 它能帮你做什么
 
@@ -18,16 +18,17 @@
 
 ## 安装
 
-1. 装好 **Forge 1.20.1**。
-2. 把 **TACZ** 本体和本模组的 jar 一起放进 `mods/` 文件夹。
+1. 装好 **NeoForge 21.1.x（Minecraft 1.21.1）**。
+2. 把 **TACZ NeoForge 1.21.1 本体**和本模组的 jar 一起放进 `mods/` 文件夹。
 3. 进游戏，对着枪按 **Z**。
 
 本模组只需要装在自己这边：服务器上照旧装它的 TACZ 就行，不需要为本模组做任何改动，多人游戏里照常用。
 
 ## 版本要求
 
-- Minecraft **1.20.1** + Forge **47.3.x**
-- TACZ **1.1.4 及以上**；当前在 **1.2.0-hotfix** 上编译和试玩。1.2.0 改过取景变换的私有签名，轨道相机 mixin 已改注两个版本都有的 `applyAnimationConstraintTransform`；若在 1.1.x 上遇到转视角/预览失灵，请先用 0.4.1 对照
+- Minecraft **1.21.1** + NeoForge **21.1.x**
+- TACZ **1.2.0 及以上**（NeoForge 1.21.1 构建）；本版在 **1.2.0-hotfix** 上编译和试玩
+- 1.20.1 Forge 版本见 `main` 分支的 **v0.4.2**
 - 可选：装了 **TACZ Addon** 并开着它的「随意配件」时，本模组会自动适配 —— 那种情况下装配件不再要求"手上有实物"（这把枪仍然只接受它认的配件）
 
 ## 更多
@@ -38,15 +39,15 @@
 
 ## 自己构建
 
-1. 先把 TACZ 本体 jar 放进 `libs/`（文件名照 `gradle.properties` 里的 `tacz_version` 来）。
+1. 先把 **TACZ NeoForge 1.21.1** 的 jar 放进 `libs/`，文件名照 `gradle.properties` 里的 `tacz_version` 来（例如 `tacz-neoforge-1.21.1-1.2.0-hotfix.jar`）。
 2. 然后：
 
 ```bash
 ./gradlew build      # 产物在 build/libs/
-./gradlew runClient  # 起一个开发用客户端
+./gradlew runClient  # 起一个开发用客户端（run/client）
 ```
 
-Windows 上也可以直接双击 `verify-client.bat`：先构建、再起开发客户端，关掉游戏后自动扫 `run/logs/latest.log` 里的 `at com.ztweaks` 异常。`verify-client.bat --check` 只查依赖不启动，`--skip-build` 跳过构建。
+Windows 上也可以直接双击 `verify-client.bat`：先构建、再起开发客户端，关掉游戏后自动扫 `run/client/logs/latest.log` 里的 `at com.ztweaks` 异常。`verify-client.bat --check` 只查依赖不启动，`--skip-build` 跳过构建。
 
 ## 许可
 

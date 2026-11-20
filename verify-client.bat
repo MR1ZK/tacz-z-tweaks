@@ -10,7 +10,7 @@ rem  --skip-build  跳过构建，直接启动
 rem  --check       只检查依赖与目录，不启动游戏
 rem ============================================================
 
-set "TACZ_JAR=libs\tacz-1.20.1-1.2.0-hotfix.jar"
+set "TACZ_JAR=libs\tacz-neoforge-1.21.1-1.2.0-hotfix.jar"
 set "SKIP_BUILD="
 set "CHECK_ONLY="
 
@@ -37,7 +37,7 @@ if not exist "gradlew.bat" (
 )
 if not exist "%TACZ_JAR%" (
     echo [x] 缺少 TACZ 本体：%TACZ_JAR%
-    echo     把 TACZ 1.20.1-1.2.0-hotfix 的 jar 放进 libs\ 后再试。
+    echo     把 TACZ NeoForge 1.21.1-1.2.0-hotfix 的 jar 放进 libs\ 后再试。
     exit /b 1
 )
 echo [ok] 仓库根目录：%CD%
