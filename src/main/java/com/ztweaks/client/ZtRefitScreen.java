@@ -301,6 +301,11 @@ public class ZtRefitScreen extends GunRefitScreen {
     private int lastRowClickIndex = -1;
     private int lastRowClickButton = -1;
 
+    /** 槽位条右键双击：第一次右键只选中，第二次才卸下，避免误触直接把配件卸掉。 */
+    private long lastSlotClickTime = 0L;
+    private int lastSlotClickIndex = -1;
+    private int lastSlotClickButton = -1;
+
     /** 信息卡三列：名字+描述 / 参数（当前值） / 参数（变化项）。 */
     private final List<Component> infoMain = new ArrayList<>();
     private final List<Component> infoStats = new ArrayList<>();
@@ -407,6 +412,9 @@ public class ZtRefitScreen extends GunRefitScreen {
         box.setValue(searchQuery);
         box.setResponder(value -> {
             searchQuery = value;
+            // 换搜索词等于换一批候选，从头开始；否则保留原来的滚动位置
+            selected = 0;
+            scroll = 0;
             invalidateCandidates();
         });
         this.searchBox = box;
@@ -686,6 +694,8 @@ public class ZtRefitScreen extends GunRefitScreen {
         if (player == null) {
             return;
         }
+        ResourceLocation previousId = selected >= 0 && selected < candidates.size()
+                ? attachmentIdOf(candidates.get(selected).stack()) : null;
         ItemStack gun = gunStack();
         IGun iGun = IGun.getIGunOrNull(gun);
         AttachmentType type = RefitTransform.getCurrentTransformType();
@@ -765,8 +775,17 @@ public class ZtRefitScreen extends GunRefitScreen {
         found.sort(candidateComparator());
         candidates.clear();
         candidates.addAll(found);
+        // 安装/卸下后服务端会触发 init() 重建列表；不要回到顶部，也不要丢掉当前选中项
+        // （如果它还在列表里）。scroll 保留，drawCandidateList 会按新长度夹取。
         selected = 0;
-        scroll = 0;
+        if (previousId != null) {
+            for (int i = 0; i < candidates.size(); i++) {
+                if (previousId.equals(attachmentIdOf(candidates.get(i).stack()))) {
+                    selected = i;
+                    break;
+                }
+            }
+        }
         samplesDirty = true;
     }
 
@@ -2520,13 +2539,25 @@ public class ZtRefitScreen extends GunRefitScreen {
             OrbitCamera.reset();
             return true;
         }
-        // 槽位条（几何与绘制同源：slotRect）：左键=选中该槽位，右键=直接卸下该槽位上的配件。
-        // 右键在这里就早退，才不会落到底部"空白处=平移"那一支去拖相机。
+        // 槽位条（几何与绘制同源：slotRect）：左键=选中该槽位；右键双击=卸下该槽位上的配件。
+        // 第一次右键只选中，第二次（250ms 内同一槽位）才卸下；右键在这里早退，不会去拖相机。
         List<AttachmentType> types = slotTypes();
         for (int i = 0; i < types.size(); i++) {
             if (slotRect(i).contains(mouseX, mouseY)) {
                 if (button == 1) {
-                    unloadSlot(types.get(i));
+                    long now = Util.getMillis();
+                    boolean doubleClick = i == lastSlotClickIndex
+                            && lastSlotClickButton == 1
+                            && now - lastSlotClickTime < DOUBLE_CLICK_MS;
+                    lastSlotClickTime = now;
+                    lastSlotClickIndex = i;
+                    lastSlotClickButton = 1;
+                    if (doubleClick) {
+                        lastSlotClickIndex = -1;
+                        unloadSlot(types.get(i));
+                    } else {
+                        selectSlot(types.get(i));
+                    }
                 } else {
                     selectSlot(types.get(i));
                 }
@@ -2556,21 +2587,25 @@ public class ZtRefitScreen extends GunRefitScreen {
             for (int i = 0; i < rows && scroll + i < candidates.size(); i++) {
                 if (rowRect(list, i).contains(mouseX, mouseY)) {
                     int index = scroll + i;
-                    // 双击直接装上：省掉"点配件 → 点安装"那一步。判定照抄 MC 原生
-                    // AbstractContainerScreen（本界面继承的是 Screen，拿不到那份实现）。
+                    // 双击手势：左键双击=装上这一件；右键双击=卸下当前槽位（issue #19）。
+                    // 判定照抄 MC 原生 AbstractContainerScreen（本界面继承的是 Screen，拿不到那份实现）。
                     // 记的是候选下标而不是屏幕行号：两击之间滚一下滚轮，行号就漂移了。
                     long now = Util.getMillis();
-                    boolean doubleClick = button == 0 && index == lastRowClickIndex
-                            && lastRowClickButton == 0 && now - lastRowClickTime < DOUBLE_CLICK_MS;
+                    boolean doubleClick = index == lastRowClickIndex
+                            && button == lastRowClickButton && now - lastRowClickTime < DOUBLE_CLICK_MS;
                     lastRowClickTime = now;
                     lastRowClickIndex = index;
                     lastRowClickButton = button;
                     selected = index;
                     samplesDirty = true;
                     if (doubleClick) {
-                        // 装完立刻作废，否则第三击又会被当成一次双击
+                        // 操作完立刻作废，否则第三击又会被当成一次双击
                         lastRowClickIndex = -1;
-                        installSelected();
+                        if (button == 0) {
+                            installSelected();
+                        } else if (button == 1) {
+                            unloadSlot(RefitTransform.getCurrentTransformType());
+                        }
                     }
                     return true;
                 }
@@ -2617,13 +2652,11 @@ public class ZtRefitScreen extends GunRefitScreen {
                 // 左键：上下拖 = roll，绕枪械自身长轴（模型 Z 轴）滚转；
                 // 左右拖 = yaw，绕竖直轴环绕。两个自由度已足以到达任意姿态，故不再设"点头"。
                 //
-                // 手感语义（下拖 / 上拖互为反向，凭这个分支里的正负号切换）：
-                // 鼠标下拖 = 枪"看得见的那一面"向观察者翻过来，上拖翻回去。
-                // 取负是 d10311a 按手感反馈从 +fy 定的，也是这里唯一的方向开关，觉得反了改这一个符号即可。
-                // 核查记录：构造（build/classes）与发布 jar（含游戏实例里那份）的 m_7979_ 字节码
-                // 都在 dneg 之后紧跟 dmul + rotateRoll，即本行确实编译进去了。
-                OrbitCamera.rotateRoll((float) (-fy * ZtConfig.ROLL_SPEED.get()));
-                OrbitCamera.rotateY((float) (fx * ZtConfig.YAW_SPEED.get()));
+                // 手感语义按 issue #19 反了一档：鼠标拖动方向 = 枪自身转动的方向，
+                // 而不是"拖动相机看枪的另一面"。左右拖 = yaw，上下拖 = roll；
+                // 两个符号都在这里，觉得又反了只改这一处。
+                OrbitCamera.rotateRoll((float) (fy * ZtConfig.ROLL_SPEED.get()));
+                OrbitCamera.rotateY((float) (-fx * ZtConfig.YAW_SPEED.get()));
             }
             return true;
         }
@@ -2696,6 +2729,8 @@ public class ZtRefitScreen extends GunRefitScreen {
                 type == RefitTransform.getCurrentTransformType() ? AttachmentType.NONE : type)) {
             // 换槽位就是换一批配件，旧搜索词留着只会让人以为"列表怎么是空的"
             this.searchQuery = "";
+            this.selected = 0;
+            this.scroll = 0;
             this.init();
         }
     }
@@ -3225,8 +3260,6 @@ public class ZtRefitScreen extends GunRefitScreen {
      */
     private void invalidateCandidates() {
         cachedType = null;
-        selected = 0;
-        scroll = 0;
         samplesDirty = true;
     }
 
