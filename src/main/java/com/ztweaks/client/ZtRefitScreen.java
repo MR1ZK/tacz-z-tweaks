@@ -1204,12 +1204,18 @@ public class ZtRefitScreen extends GunRefitScreen {
      */
     private void rebuildLayout() {
         ThemeMetrics metrics = ZtUi.metrics();
-        int pad = metrics.panelPadding();
-        int rowH = Math.max(12, Math.round(ROW_H * metrics.density()));
+        // 480×270 是硬验收尺寸，也是 GUI scale 4 下最常见的逻辑尺寸：
+        // 行高 / 槽位 / 边距 / 列表宽度各收一档，详情条降到 64，给候选列表多留一行。
+        boolean compact = this.width < 560 || this.height < 320;
+        int pad = compact ? Math.min(metrics.panelPadding(), 5) : metrics.panelPadding();
+        int rowBase = compact ? 17 : ROW_H;
+        int rowH = Math.max(12, Math.round(rowBase * metrics.density()));
         int menuRowH = Math.max(9, Math.round(MENU_ROW_H * metrics.density()));
         int menuSepH = Math.max(2, Math.round(MENU_SEP_H * metrics.density()));
-        int slot = Math.max(14, Math.round(SLOT * metrics.density()));
-        int slotLabelH = Math.max(SLOT_LABEL_H, Math.round(SLOT_LABEL_H * metrics.density()));
+        int slotBase = compact ? 20 : SLOT;
+        int slot = Math.max(14, Math.round(slotBase * metrics.density()));
+        int labelBase = compact ? 10 : SLOT_LABEL_H;
+        int slotLabelH = Math.max(9, Math.round(labelBase * metrics.density()));
         int slotBarH = SLOT_PAD_TOP + slot + slotLabelH + SLOT_PAD_BOTTOM;
         int slotBarTop = this.height - slotBarH - 6;
 
@@ -1217,10 +1223,12 @@ public class ZtRefitScreen extends GunRefitScreen {
         int step = slotStep(types, slot, pad);
         int slotBarX0 = (this.width - types.size() * step) / 2;
 
-        int detailH = DETAIL_H;
-        int detailY = slotBarTop - metrics.slotGap() - detailH;
+        int detailH = compact ? 64 : DETAIL_H;
+        int slotGap = compact ? Math.min(metrics.slotGap(), 8) : metrics.slotGap();
+        int detailY = slotBarTop - slotGap - detailH;
         int listH = Math.max(64, detailY - 8 - 26);
-        int listX = this.width - LIST_W - pad;
+        int listW = compact ? Math.max(150, Math.round(this.width * 0.34f)) : LIST_W;
+        int listX = this.width - listW - pad;
 
         Rect preset = new Rect(pad, 4, 64, 14);
         Rect theme = new Rect(preset.x() + preset.w() + 4, preset.y(), preset.w(), preset.h());
@@ -1234,7 +1242,7 @@ public class ZtRefitScreen extends GunRefitScreen {
             slots.add(new Rect(cell + (step - slot) / 2, slotBarTop + SLOT_PAD_TOP, slot, slot));
         }
 
-        Rect list = new Rect(listX, 26, LIST_W, listH);
+        Rect list = new Rect(listX, 26, listW, listH);
         Rect search = new Rect(list.x() + 4, footerY(list),
                 list.w() - 8 - SORT_W - SORT_GAP, SEARCH_H);
         Rect sort = new Rect(search.x() + search.w() + SORT_GAP, search.y(), SORT_W, SEARCH_H);
@@ -1243,7 +1251,9 @@ public class ZtRefitScreen extends GunRefitScreen {
         Rect install = new Rect(pad + (this.width - pad * 2) - 136, detailY + detailH - 16, 64, 14);
         Rect unload = new Rect(pad + (this.width - pad * 2) - 68, detailY + detailH - 16, 64, 14);
 
-        int leftWidth = (int) (detail.w() * metrics.detailLeftRatio());
+        float leftRatio = compact ? Math.min(metrics.detailLeftRatio(), 0.38f)
+                : metrics.detailLeftRatio();
+        int leftWidth = (int) (detail.w() * leftRatio);
         int columnWidth = (detail.w() - leftWidth - DETAIL_RIGHT_RESERVE) / 3;
         int[] columns = new int[3];
         for (int i = 0; i < columns.length; i++) {
