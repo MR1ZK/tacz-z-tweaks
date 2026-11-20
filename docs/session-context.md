@@ -2,6 +2,8 @@
 
 > 2026-11-18 更新，覆盖到 **v0.4.1**（Latest）。0.1.3 之后又走完四轮：① 与 TACZ Addon「随意配件」的对接修复；② **界面主题**（四套：默认（TACZ 青）/ MD3 质感 / 千禧航空 / Win 经典，默认主题可调强调色，见 ADR-0007 与 `CONTEXT.md` 的「主题」「强调色」）；③ **全盘 review（标准 / 规格双轴）及其修复**（按钮三态色与暗角 / HUD 底衬进主题、术语改名、详情条几何合一等）；④ 三条基线味道重构（详情条列几何、`SlotBar` 具名记录、排序键包成 `SortKey`；4/5 与 5/5 经确认不做）。其间还按实机反馈重排了底栏与信息框（名字移到方块下方、底栏不压信息框、浅色主题文字改走黑墨、不可用槽位改红）。面向下一个接手的人（人或 agent）：读完这份文档应该能接着干活，不用翻对话记录。（**2026-10-18 补**：剩下的功能待办已统一标记为「暂时不做」，见「已知问题 / 待办」抬头。同日另做了一轮**主题材质打磨**：面板内侧高光 / 暗边与玻璃高光带、按钮受光面、弹层投影、候选行与当前槽位的强调色渐变、详情条与概览卡的分栏引导线 —— 只动绘制，不碰布局与命中，口径仍在 ADR-0007 的"颜色 + 质感"内。）
 
+> **2026-11-20：TACZ 1.2.0-hotfix 兼容**。1.2.0 把 `FirstPersonRenderGunEvent.applyFirstPersonPositioningTransform` 从 5 参改成 6 参（加了 `AdsPath`），旧 mixin 会静默失效；轨道相机改注 1.1.8/1.2.0 都有的 `applyAnimationConstraintTransform`。已在 1.2.0-hotfix 上启动、进世界、打开改装界面，调试 HUD 的 `mixin hits` 持续增长。1.2.0 的 NeoForge 1.21.1 移植另行开分支。
+
 > **2026-11-18：主题系统 v2 已随 v0.4.0 发布**（[ADR-0008](adr/0008-theme-system-v2.md) 取代 ADR-0007 的第 1、2、5 条）。主题改成 `assets/z_tweaks/themes/*.json`、`ThemeRegistry` 懒加载（资源包可覆盖/新增）、配置 `theme` 从枚举名改为字符串 id 并自动映射旧值；`RefitLayout` 快照接管全部静态几何，五个受控参数已消费；`ThemeChrome` 装饰层已进 JSON 并生效，配置屏也换上了主题底与外框；氛围动效（`spark` / `flow` / `bokeh`）进 JSON，配置 `motion` 分 `FULL` / `REDUCED` / `OFF`，低于 45 FPS 持续 3 秒自动关粒子。**默认主题与 Win 经典不动效，MD3 与千禧航空开始有粒子层**。切主题的 180ms 过渡也已落地（调色板逐色插值、0.5 处换 chrome/effect、正弦压暗遮硬切；命中从第一帧就用最终几何）。九宫格贴图的解析与绘制也已接上；> **2026-11-18 追加：真实毛玻璃**（[ADR-0009](adr/0009-glass-blur.md)）。千禧航空的玻璃面板每 8 帧从主帧缓冲降采样一次（GPU blit + 小图回读 + `DynamicTexture`），面板按屏幕坐标取样；不写 shader。配置 `look.blur` 默认开，45 FPS 降级时自动关。`effects.blur.enabled/strength` 由主题声明，只有 `Surface.GLASS` 消费。
 
 **千禧航空、MD3、Win 经典各带一张同布局 atlas**（`textures/gui/theme/<id>.png`，**画布必须是 256×256**；panel/popup 各 64×64、按钮三态各 64×32、标题条 128×16），外框、按钮与标题条改走贴图，角饰/底纹仍是程序化。1.20.1 的 `blitNineSliced` 内部走 256×256 的 `blit`，非 256 画布会把 UV 按比例缩放、中心采到边框（实机已踩过：面板被平铺成网格）。默认主题刻意保持程序化：它是"改造前外观"的基准。缺图仍会自动回落。
@@ -21,7 +23,7 @@
 
 ## 构建与运行
 
-- 需要 `libs/tacz-1.20.1-1.1.8-hotfix.jar`（TACZ 本体，不入库）
+- 需要 `libs/tacz-1.20.1-1.2.0-hotfix.jar`（TACZ 本体，不入库；1.2.0 起取景变换改过签名）
 - `./gradlew build` / `./gradlew runClient`
 - Windows 实机验证：`verify-client.bat`（构建 + `runClient`，关掉游戏后自动扫 `run/logs/latest.log` 里的 `at com.ztweaks`；`--check` 只查依赖，`--skip-build` 跳过构建）
 - 提交用 `git -c user.name=MR1ZK -c user.email=...noreply.github.com`（**仓库没配 git 身份**，别改全局 config）
@@ -82,7 +84,7 @@
   3. `menuKeyAt(menu, rows, scroll, sepKey, noneKey, mouseX, mouseY)` —— 命中检测（**必须与绘制顺序严格同源**，改完三套弹层要逐个点一遍）。
   **一个已知的类型障碍**：排序弹层的行已是 `SortKey`（味道 3/5 的产物），预设与主题的还是 `Integer`。要共用一个命中/内容高函数，只有两条路：(a) 让公共函数收 `ToIntFunction<T>`（略绕但类型安全）；(b) 给排序弹层并行留一份 `List<Integer>` 的 code 列表（简单但多一份数据）。**推荐 (a)**，因为它顺手把"行是值类型还是 int"这层差异挡在公共函数之外，将来主题/预设也换成值类型时不用再改公共函数。
 - **规格轴"缺失 5 项"经确认为"不做"**（2026-09-28）：相机按槽位记忆、点槽位的平滑运镜与挂载点高亮描边、空槽在 3D 里画"+"、模型缩放淡入淡出、条目"左键装 / 右键卸 + 装完收列表"。**不要再按计划 §3.2 / §3.3 报它们为缺失。**（"每主题一份强调色"同期定为一句话注释与 ADR 对齐，不落实现。）
-- **mixin 目标是 1.1.8-hotfix 的签名**。mods.toml 下限放到 `[1.1.4,)` 但没对 1.1.4 实际冒烟过；旧版本若改了目标方法，注入静默降级（相机/虚拟装配失效，其余正常）
+- **mixin 目标已跟到 1.2.0-hotfix**：1.2.0 把 `applyFirstPersonPositioningTransform` 从 5 参加到 6 参（多了 `AdsPath`），旧注入会静默失效；轨道相机改注 1.1.8/1.2.0 都有的 `applyAnimationConstraintTransform(PoseStack, BedrockGunModel, float)`。mods.toml 仍写 `[1.1.4,)`，但 1.1.4 没再冒烟；旧版本若改了目标方法，注入静默降级（相机/虚拟装配失效，其余正常）
 - ~~`computeProsCons()` 每帧无缓存地跑（`AttachmentCacheProperty.eval` ×2）~~ —— 已随 #9 的缓存入口还掉：现在只有"枪 + NBT + 预览件"三者之一变化时才重算
 - 配置屏输入框改数值不会把滑块拖回（输入中间态会乱跳，故意不同步）
 - ~~闲置卡片第三列预留了但没放数据~~ —— 第二列现在是全量参数（含 `docs/research/client-gun-params.md` 定的那六项，顺序照它）、第三列是变化项（#7/#8 已落地）。后坐力仍**不该进**（样条曲线，非标量）

@@ -10,7 +10,7 @@ rem  --skip-build  跳过构建，直接启动
 rem  --check       只检查依赖与目录，不启动游戏
 rem ============================================================
 
-set "TACZ_JAR=libs\tacz-1.20.1-1.1.8-hotfix.jar"
+set "TACZ_JAR=libs\tacz-1.20.1-1.2.0-hotfix.jar"
 set "SKIP_BUILD="
 set "CHECK_ONLY="
 
@@ -37,7 +37,7 @@ if not exist "gradlew.bat" (
 )
 if not exist "%TACZ_JAR%" (
     echo [x] 缺少 TACZ 本体：%TACZ_JAR%
-    echo     把 TACZ 1.20.1-1.1.8-hotfix 的 jar 放进 libs\ 后再试。
+    echo     把 TACZ 1.20.1-1.2.0-hotfix 的 jar 放进 libs\ 后再试。
     exit /b 1
 )
 echo [ok] 仓库根目录：%CD%
@@ -72,18 +72,18 @@ call gradlew.bat runClient --console=plain
 set "GAME_EXIT=%ERRORLEVEL%"
 
 echo.
-if exist "run\logs\latest.log" (
-    findstr /c:"at com.ztweaks" "run\logs\latest.log" >nul 2>&1
+if exist "run\client\logs\latest.log" (
+    findstr /c:"at com.ztweaks" "run\client\logs\latest.log" >nul 2>&1
     if errorlevel 1 (
         echo [ok] 日志里没有 com.ztweaks 的异常栈
     ) else (
         echo [!] 日志里有 com.ztweaks 的异常栈：
-        findstr /n /c:"at com.ztweaks" "run\logs\latest.log"
+        findstr /n /c:"at com.ztweaks" "run\client\logs\latest.log"
     )
 ) else (
-    echo [!] 没找到 run\logs\latest.log，跳过日志检查
+    echo [!] 没找到 run\client\logs\latest.log，跳过日志检查
 )
-if exist "run\screenshots" echo [i] 截图目录：run\screenshots
+if exist "run\client\screenshots" echo [i] 截图目录：run\client\screenshots
 
 echo.
 echo [i] 客户端退出码：%GAME_EXIT%

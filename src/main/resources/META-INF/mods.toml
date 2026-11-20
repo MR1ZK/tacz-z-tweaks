@@ -28,8 +28,9 @@ side = "BOTH"
 [[dependencies.z_tweaks]]
 modId = "tacz"
 mandatory = true
-# 下限 1.1.4：空 range 实测会导致加载崩溃；1.1.4 之前的 TACZ 内部结构差异太大，
-# 注入的 mixin 目标（renderFirstPerson / applyFirstPersonPositioningTransform）对不上。
+# 下限 1.1.4：空 range 实测会导致加载崩溃；1.1.4 之前的 TACZ 内部结构差异太大。
+# 1.2.0 起 applyFirstPersonPositioningTransform 改成 6 参，轨道相机 mixin 已改注
+# 两版都有的 applyAnimationConstraintTransform；当前只对 1.2.0-hotfix 实机冒烟过。
 versionRange = "[1.1.4,)"
 ordering = "AFTER"
 side = "BOTH"
